@@ -1,0 +1,19 @@
+Artificial Intelligence (AI) is a branch of computer science that aims to create intelligent machines that can perform tasks that typically require human intelligence. These tasks include learning, reasoning, problem-solving, perception, and language understanding.
+
+Machine Learning (ML) is a subset of AI that focuses on the development of algorithms that allow computers to learn from and make predictions or decisions based on data. ML algorithms build mathematical models based on training data to make predictions or decisions without being explicitly programmed to perform the task.
+
+Deep Learning is a further subset of machine learning that uses neural networks with multiple layers (hence "deep") to progressively extract higher-level features from raw input. Deep learning has been particularly successful in areas such as image recognition, natural language processing, and speech recognition.
+
+Retrieval-Augmented Generation (RAG) is a technique that combines retrieval from a knowledge base with text generation. In RAG, a retrieval system first finds relevant documents or passages from a knowledge base based on a user query, and then a language model generates a response conditioned on both the query and the retrieved context.
+
+Vector databases are specialized database systems designed to store and query high-dimensional vector embeddings. They enable efficient similarity search, which is crucial for RAG systems. Popular vector databases include Qdrant, Pinecone, and Weaviate.
+
+BM25 is a ranking algorithm used by search engines to estimate the relevance of documents to a given search query. It is based on the probabilistic retrieval framework and considers term frequency, inverse document frequency, and document length normalization.
+
+Hybrid search combines both dense vector search (semantic similarity) and sparse keyword search (exact term matching) to provide better retrieval results than either method alone. Reciprocal Rank Fusion (RRF) is a common technique for combining the results from multiple ranking methods.
+
+LiTeLLM is a lightweight proxy that provides a unified interface to various LLM providers. It acts as a middleware layer that can route requests to different model providers based on configuration, providing a consistent API regardless of the underlying model.
+
+Reranking is a two-stage retrieval process where an initial set of candidate documents is retrieved using an efficient method (like embedding similarity), and then a more expensive but more accurate model (like a cross-encoder) re-scores and re-orders the candidates.
+
+The NVIDIA NeMo architecture provides a comprehensive framework for building and deploying large language models. It includes tools for training, fine-tuning, and serving models at scale.

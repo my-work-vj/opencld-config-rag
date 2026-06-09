@@ -1,0 +1,58 @@
+# Hybrid RAG Pipeline - dense + sparse retrieval with RRF fusion
+pipeline:
+  name: hybrid_rag_pipeline
+  description: Best quality retrieval combining dense vector search and sparse BM25 keyword search with RRF fusion
+
+  stages:
+    ingestion:
+      strategy: text_ingestion
+      config:
+        encoding: utf-8
+
+    chunking:
+      strategy: recursive_chunking
+      config:
+        chunk_size: 1000
+        chunk_overlap: 200
+        separators: ["\n\n", "\n", ". ", " ", ""]
+
+    embedding:
+      strategy: litellm_embedding
+      config:
+        model: nvidia-embed
+        dimensions: 2048
+
+    indexing:
+      strategy: qdrant_indexing
+      config:
+        collection_name: rag_documents
+        vector_size: 2048
+        distance: Cosine
+        recreate: false
+
+    retrieval:
+      strategy: hybrid_bm25_vector
+      config:
+        top_k: 5
+        dense_weight: 0.5
+        sparse_weight: 0.5
+        rrf_k: 60
+        bm25_k1: 1.5
+        bm25_b: 0.75
+
+    reranking:
+      strategy: litellm_reranking
+      config:
+        model: rerank-english-v3.0
+        top_k: 5
+
+    response:
+      strategy: contextual_response
+      config:
+        model: llama-3.3-70b-versatile
+        temperature: 0.3
+        max_tokens: 2048
+        system_prompt: |
+          You are a helpful RAG assistant. Answer the user's question based ONLY on the provided context.
+          If the context doesn't contain enough information, say so clearly.
+          Cite your sources using [source: filename] notation.

@@ -1,0 +1,51 @@
+# Naive RAG Pipeline - single-pass dense retrieval, no rewriting, no reranking
+pipeline:
+  name: naive_rag_pipeline
+  description: Simple single-pass dense retrieval - fastest, lowest quality
+
+  stages:
+    ingestion:
+      strategy: text_ingestion
+      config:
+        encoding: utf-8
+
+    chunking:
+      strategy: recursive_chunking
+      config:
+        chunk_size: 1000
+        chunk_overlap: 200
+        separators: ["\n\n", "\n", ". ", " ", ""]
+
+    embedding:
+      strategy: litellm_embedding
+      config:
+        model: nvidia-embed
+        dimensions: 2048
+
+    indexing:
+      strategy: qdrant_indexing
+      config:
+        collection_name: rag_documents
+        vector_size: 2048
+        distance: Cosine
+        recreate: false
+
+    retrieval:
+      strategy: naive_rag
+      config:
+        top_k: 5
+
+    reranking:
+      strategy: pass_through
+      config:
+        top_k: 5
+
+    response:
+      strategy: contextual_response
+      config:
+        model: llama-3.3-70b-versatile
+        temperature: 0.3
+        max_tokens: 1024
+        system_prompt: |
+          You are a helpful RAG assistant. Answer the user's question based ONLY on the provided context.
+          If the context doesn't contain enough information, say so clearly.
