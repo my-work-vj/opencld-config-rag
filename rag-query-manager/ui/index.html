@@ -1,0 +1,583 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RAG Query Manager</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d28;
+    --surface2: #242837;
+    --border: #2e3348;
+    --text: #e1e4ed;
+    --text2: #8b8fa3;
+    --accent: #6366f1;
+    --accent2: #818cf8;
+    --green: #22c55e;
+    --yellow: #eab308;
+    --red: #ef4444;
+    --radius: 8px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg); color: var(--text); line-height: 1.6;
+    padding: 20px;
+  }
+  .container { max-width: 1200px; margin: 0 auto; }
+  h1 { font-size: 1.5rem; margin-bottom: 4px; }
+  h1 small { font-size: 0.8rem; color: var(--text2); font-weight: 400; }
+  h2 { font-size: 1.1rem; margin-bottom: 12px; }
+  h3 { font-size: 0.95rem; margin-bottom: 8px; color: var(--accent2); }
+
+  .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
+  .status-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; }
+  .status-dot.green { background: var(--green); }
+  .status-dot.yellow { background: var(--yellow); }
+  .status-dot.red { background: var(--red); }
+
+  .card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 20px; margin-bottom: 16px;
+  }
+  .card-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 16px; }
+  .stat { text-align: center; padding: 12px; background: var(--surface2); border-radius: var(--radius); }
+  .stat .num { font-size: 1.5rem; font-weight: 700; color: var(--accent2); }
+  .stat .label { font-size: 0.8rem; color: var(--text2); }
+
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+
+  label { display: block; font-size: 0.85rem; color: var(--text2); margin-bottom: 4px; }
+  input, select, textarea {
+    width: 100%; padding: 8px 12px; background: var(--surface2); border: 1px solid var(--border);
+    border-radius: var(--radius); color: var(--text); font-size: 0.9rem;
+  }
+  textarea { font-family: inherit; resize: vertical; min-height: 60px; }
+  input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent); }
+
+  .btn {
+    padding: 8px 20px; border: none; border-radius: var(--radius); cursor: pointer;
+    font-size: 0.9rem; font-weight: 500; transition: all 0.2s;
+  }
+  .btn-primary { background: var(--accent); color: white; }
+  .btn-primary:hover { background: var(--accent2); }
+  .btn-sm { padding: 4px 12px; font-size: 0.8rem; }
+
+  .result-box {
+    background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 12px; margin-top: 8px; max-height: 300px; overflow-y: auto;
+    white-space: pre-wrap; font-size: 0.9rem;
+  }
+  .result-box .meta { color: var(--text2); font-size: 0.8rem; margin-bottom: 8px; }
+
+  .chunk-item {
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 8px 12px; margin-bottom: 6px; font-size: 0.85rem;
+  }
+  .chunk-item .score { color: var(--accent2); font-weight: 600; }
+  .chunk-item .method { color: var(--yellow); font-size: 0.8rem; }
+  .chunk-item .content { color: var(--text2); margin-top: 4px; }
+
+  .compare-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+  .compare-card {
+    background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 12px;
+  }
+  .compare-card h4 { font-size: 0.9rem; margin-bottom: 4px; }
+  .compare-card .method-badge {
+    display: inline-block; padding: 2px 8px; border-radius: 4px;
+    font-size: 0.75rem; background: var(--surface); color: var(--accent2);
+  }
+
+  .tabs { display: flex; gap: 4px; margin-bottom: 16px; }
+  .tab {
+    padding: 8px 16px; background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius) var(--radius) 0 0; cursor: pointer; color: var(--text2); font-size: 0.85rem;
+  }
+  .tab.active { background: var(--surface); border-bottom-color: var(--accent); color: var(--text); }
+  .tab:hover { color: var(--text); }
+  .tab-content { display: none; }
+  .tab-content.active { display: block; }
+
+  .log-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+  .log-table th { text-align: left; padding: 8px; color: var(--text2); border-bottom: 1px solid var(--border); }
+  .log-table td { padding: 8px; border-bottom: 1px solid var(--border); }
+
+  .pipeline-tag {
+    display: inline-block; padding: 2px 8px; border-radius: 4px;
+    background: var(--surface2); font-size: 0.75rem; margin: 2px;
+  }
+
+  @media (max-width: 768px) {
+    .grid-2, .grid-3, .compare-grid { grid-template-columns: 1fr; }
+  }
+
+  .loading { opacity: 0.5; pointer-events: none; }
+  .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; vertical-align: middle; margin-right: 8px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .error { color: var(--red); font-size: 0.85rem; margin-top: 4px; }
+  .success { color: var(--green); font-size: 0.85rem; margin-top: 4px; }
+
+  .flex { display: flex; gap: 8px; align-items: center; }
+  .flex-wrap { flex-wrap: wrap; }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="header">
+    <div>
+      <h1>RAG Query Manager <small>v1.0</small></h1>
+      <div id="statusBar" style="font-size:0.85rem; color: var(--text2);">
+        <span class="status-dot yellow"></span> Checking services...
+      </div>
+    </div>
+    <button class="btn btn-sm" onclick="refreshHealth()">⟳ Refresh</button>
+  </div>
+
+  <div class="tabs">
+    <div class="tab active" onclick="switchTab('query')">Query</div>
+    <div class="tab" onclick="switchTab('compare')">Compare</div>
+    <div class="tab" onclick="switchTab('ingest')">Ingest</div>
+    <div class="tab" onclick="switchTab('logs')">Logs</div>
+  </div>
+
+  <!-- QUERY TAB -->
+  <div id="tab-query" class="tab-content active">
+    <div class="grid-2">
+      <div class="card">
+        <h2>Run Query</h2>
+        <div style="margin-bottom:12px;">
+          <label>Pipeline</label>
+          <select id="queryPipeline" onchange="loadPipelineStrategies()"></select>
+        </div>
+        <div style="margin-bottom:12px;">
+          <label>Retrieval Strategy Override</label>
+          <select id="queryRetrievalOverride">
+            <option value="">— Default —</option>
+          </select>
+        </div>
+        <div style="margin-bottom:12px;">
+          <label>Query</label>
+          <textarea id="queryInput" rows="3" placeholder="Enter your question..."></textarea>
+        </div>
+        <div class="flex">
+          <button class="btn btn-primary" onclick="runQuery()">Ask</button>
+          <span id="querySpinner" style="display:none;"><span class="spinner"></span>Thinking...</span>
+        </div>
+        <div id="queryError" class="error" style="margin-top:8px;"></div>
+      </div>
+
+      <div class="card">
+        <h2>Response</h2>
+        <div style="margin-bottom:8px;">
+          <span id="queryMethod" class="pipeline-tag"></span>
+          <span id="queryTiming" style="color:var(--text2);font-size:0.85rem;"></span>
+        </div>
+        <div id="queryResponse" class="result-box">Run a query to see results.</div>
+        <h3 style="margin-top:12px;">Retrieved Chunks</h3>
+        <div id="queryChunks"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- COMPARE TAB -->
+  <div id="tab-compare" class="tab-content">
+    <div class="card">
+      <h2>Compare Pipelines</h2>
+      <div style="margin-bottom:12px;">
+        <label>Query</label>
+        <textarea id="compareQuery" rows="2" placeholder="Enter your question..."></textarea>
+      </div>
+      <div style="margin-bottom:12px;">
+        <label>Select Pipelines to Compare</label>
+        <div id="comparePipelineSelect" class="flex flex-wrap"></div>
+      </div>
+      <div class="flex">
+        <button class="btn btn-primary" onclick="runCompare()">Compare</button>
+        <span id="compareSpinner" style="display:none;"><span class="spinner"></span>Running pipelines...</span>
+      </div>
+      <div id="compareError" class="error" style="margin-top:8px;"></div>
+    </div>
+    <div id="compareResults" class="compare-grid"></div>
+  </div>
+
+  <!-- INGEST TAB -->
+  <div id="tab-ingest" class="tab-content">
+    <div class="card">
+      <h2>Ingest Documents</h2>
+      <div style="margin-bottom:12px;">
+        <label>Pipeline</label>
+        <select id="ingestPipeline"></select>
+      </div>
+      <div style="margin-bottom:12px;">
+        <label>Source Type</label>
+        <select id="ingestSourceType">
+          <option value="auto">Auto-detect</option>
+          <option value="text">Raw Text</option>
+          <option value="web">Web Page (URL)</option>
+          <option value="pdf">PDF File (path)</option>
+        </select>
+      </div>
+      <div style="margin-bottom:12px;">
+        <label>Source (file path, URL, or raw text)</label>
+        <textarea id="ingestSource" rows="4" placeholder="e.g. /path/to/file.txt or https://example.com or paste raw text..."></textarea>
+      </div>
+      <div class="flex">
+        <button class="btn btn-primary" onclick="runIngest()">Ingest & Index</button>
+        <span id="ingestSpinner" style="display:none;"><span class="spinner"></span>Processing...</span>
+      </div>
+      <div id="ingestResult" style="margin-top:12px;"></div>
+    </div>
+  </div>
+
+  <!-- LOGS TAB -->
+  <div id="tab-logs" class="tab-content">
+    <div class="card">
+      <div class="flex" style="justify-content: space-between; margin-bottom:12px;">
+        <h2>Query Logs</h2>
+        <button class="btn btn-sm" onclick="loadLogs()">⟳ Refresh</button>
+      </div>
+      <div style="margin-bottom:12px;">
+        <label>Filter by Pipeline</label>
+        <select id="logPipelineFilter" onchange="loadLogs()">
+          <option value="">All Pipelines</option>
+        </select>
+      </div>
+      <div id="logTableContainer">
+        <table class="log-table">
+          <thead><tr><th>Time</th><th>Pipeline</th><th>Query</th><th>Method</th><th>Time (ms)</th><th>Chunks</th></tr></thead>
+          <tbody id="logBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-row">
+      <div class="stat"><div class="num" id="statPipelines">-</div><div class="label">Pipelines</div></div>
+      <div class="stat"><div class="num" id="statStrategies">-</div><div class="label">Strategies</div></div>
+      <div class="stat"><div class="num" id="statLLM">-</div><div class="label">LLM</div></div>
+      <div class="stat"><div class="num" id="statQdrant">-</div><div class="label">Qdrant</div></div>
+      <div class="stat"><div class="num" id="statPG">-</div><div class="label">PostgreSQL</div></div>
+    </div>
+    <div>
+      <h3>Available Pipelines</h3>
+      <div id="pipelineList"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = '/api/v1';
+const INGESTION_API = 'http://localhost:8081/api/v1';
+
+// ── Tab Switching ──
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+  document.querySelector(`.tab[onclick*='${name}']`).classList.add('active');
+  document.getElementById(`tab-${name}`).classList.add('active');
+}
+
+// ── Health ──
+async function refreshHealth() {
+  const bar = document.getElementById('statusBar');
+  try {
+    const res = await fetch(`${API}/health`);
+    const h = await res.json();
+
+    document.getElementById('statPipelines').textContent = h.pipeline_count;
+    document.getElementById('statLLM').textContent = h.llm_available ? '✓' : '✗';
+    document.getElementById('statQdrant').textContent = h.qdrant_available ? '✓' : '✗';
+    document.getElementById('statPG').textContent = h.postgres_available ? '✓' : '✗';
+
+    const dot = document.getElementById('statBar') || bar;
+    if (h.status === 'healthy') {
+      bar.innerHTML = '<span class="status-dot green"></span> All services healthy';
+    } else {
+      const parts = [];
+      if (!h.llm_available) parts.push('LLM');
+      if (!h.qdrant_available) parts.push('Qdrant');
+      if (!h.postgres_available) parts.push('PostgreSQL');
+      bar.innerHTML = `<span class="status-dot yellow"></span> Degraded: ${parts.join(', ')}`;
+    }
+  } catch (e) {
+    bar.innerHTML = '<span class="status-dot red"></span> Cannot reach API';
+  }
+}
+
+// ── Pipelines ──
+async function loadPipelines() {
+  try {
+    const res = await fetch(`${API}/pipelines`);
+    const data = await res.json();
+    const pipelines = data.pipelines || [];
+
+    // Populate selects
+    const querySelects = ['queryPipeline', 'logPipelineFilter'];
+    querySelects.forEach(id => {
+      const sel = document.getElementById(id);
+      if (!sel) return;
+      sel.innerHTML = '';
+      pipelines.forEach(p => {
+        const opt = document.createElement('option');
+        opt.value = p.id;
+        opt.textContent = p.name;
+        sel.appendChild(opt);
+      });
+    });
+
+    const ingestSel = document.getElementById('ingestPipeline');
+    if (ingestSel) {
+      try {
+        const ingestRes = await fetch(`${INGESTION_API}/pipelines`);
+        const ingestData = await ingestRes.json();
+        ingestSel.innerHTML = '';
+        (ingestData.pipelines || []).forEach(p => {
+          const opt = document.createElement('option');
+          opt.value = p.id;
+          opt.textContent = p.name;
+          ingestSel.appendChild(opt);
+        });
+      } catch (e) {
+        ingestSel.innerHTML = '<option value="default_rag">default_rag (offline)</option>';
+      }
+    }
+
+    // Populate compare checkboxes
+    const cmpDiv = document.getElementById('comparePipelineSelect');
+    cmpDiv.innerHTML = '';
+    pipelines.forEach(p => {
+      const label = document.createElement('label');
+      label.style.cssText = 'display:inline-flex;align-items:center;gap:4px;cursor:pointer;';
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.value = p.id;
+      cb.checked = ['naive_rag', 'vector_rag', 'hybrid_rag'].includes(p.id);
+      label.appendChild(cb);
+      label.appendChild(document.createTextNode(p.name));
+      cmpDiv.appendChild(label);
+    });
+
+    // Pipeline list in footer
+    const pl = document.getElementById('pipelineList');
+    pl.innerHTML = pipelines.map(p => `<span class="pipeline-tag">${p.name}</span>`).join('');
+
+    // Stats
+    document.getElementById('statPipelines').textContent = pipelines.length;
+
+    return pipelines;
+  } catch (e) {
+    console.error('loadPipelines:', e);
+    return [];
+  }
+}
+
+// ── Strategies ──
+async function loadStrategies() {
+  try {
+    const res = await fetch(`${API}/strategies`);
+    const data = await res.json();
+    let count = 0;
+    Object.values(data).forEach(arr => count += arr.length);
+
+    document.getElementById('statStrategies').textContent = count;
+
+    // Populate retrieval override dropdown
+    const sel = document.getElementById('queryRetrievalOverride');
+    if (data.retrieval) {
+      sel.innerHTML = '<option value="">— Default —</option>';
+      data.retrieval.forEach(s => {
+        const opt = document.createElement('option');
+        opt.value = s;
+        opt.textContent = s;
+        sel.appendChild(opt);
+      });
+    }
+  } catch (e) {
+    console.error('loadStrategies:', e);
+  }
+}
+
+// ── Load pipeline strategies (when query pipeline changes) ──
+function loadPipelineStrategies() {
+  // Currently just shows the strategy override dropdown already populated
+}
+
+// ── Run Query ──
+async function runQuery() {
+  const query = document.getElementById('queryInput').value.trim();
+  if (!query) { document.getElementById('queryError').textContent = 'Please enter a query.'; return; }
+
+  const pipeline = document.getElementById('queryPipeline').value;
+  const retrievalOverride = document.getElementById('queryRetrievalOverride').value;
+
+  const body = { query, pipeline, top_k: 5 };
+  if (retrievalOverride) {
+    body.retrieval_overrides = { config: { strategy: retrievalOverride } };
+  }
+
+  const spinner = document.getElementById('querySpinner');
+  const errDiv = document.getElementById('queryError');
+  spinner.style.display = 'inline-flex';
+  errDiv.textContent = '';
+  document.getElementById('queryResponse').textContent = '...';
+
+  try {
+    const res = await fetch(`${API}/query`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    spinner.style.display = 'none';
+
+    if (!res.ok) {
+      errDiv.textContent = data.detail || 'Query failed';
+      return;
+    }
+
+    document.getElementById('queryResponse').textContent = data.response;
+    document.getElementById('queryMethod').textContent = data.retrieval_method;
+    document.getElementById('queryTiming').textContent =
+      `Total: ${data.total_time_ms.toFixed(0)}ms | Retrieval: ${(data.timings.retrieval || 0 * 1000).toFixed(0)}ms | Response: ${(data.timings.response || 0 * 1000).toFixed(0)}ms`;
+
+    // Display chunks
+    const chunksDiv = document.getElementById('queryChunks');
+    chunksDiv.innerHTML = (data.chunks || []).map((c, i) =>
+      `<div class="chunk-item">
+        <span class="score">#${i+1} score: ${c.score.toFixed(4)}</span>
+        <span class="method">[${c.retrieval_method}]</span>
+        ${c.filename ? `<span style="color:var(--text2)">${c.filename}</span>` : ''}
+        <div class="content">${escapeHtml(c.content.slice(0, 300))}${c.content.length > 300 ? '...' : ''}</div>
+      </div>`
+    ).join('');
+  } catch (e) {
+    spinner.style.display = 'none';
+    errDiv.textContent = `Network error: ${e.message}`;
+  }
+}
+
+// ── Compare ──
+async function runCompare() {
+  const query = document.getElementById('compareQuery').value.trim();
+  if (!query) { document.getElementById('compareError').textContent = 'Please enter a query.'; return; }
+
+  const pipelines = [];
+  document.querySelectorAll('#comparePipelineSelect input[type="checkbox"]:checked').forEach(cb => {
+    pipelines.push(cb.value);
+  });
+  if (!pipelines.length) { document.getElementById('compareError').textContent = 'Select at least one pipeline.'; return; }
+
+  const spinner = document.getElementById('compareSpinner');
+  const errDiv = document.getElementById('compareError');
+  spinner.style.display = 'inline-flex';
+  errDiv.textContent = '';
+
+  try {
+    const res = await fetch(`${API}/compare`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query, pipelines, top_k: 5 }),
+    });
+    const data = await res.json();
+    spinner.style.display = 'none';
+
+    if (!res.ok) { errDiv.textContent = data.detail || 'Compare failed'; return; }
+
+    const grid = document.getElementById('compareResults');
+    grid.innerHTML = (data.results || []).map(r =>
+      `<div class="compare-card">
+        <h4>${r.pipeline}</h4>
+        <div class="method-badge">${r.retrieval_method}</div>
+        <div style="font-size:0.75rem;color:var(--text2);margin:4px 0;">
+          ${r.chunk_count} chunks | ${r.timings.total_ms ? r.timings.total_ms.toFixed(0) + 'ms' : ''}
+        </div>
+        <div class="result-box" style="max-height:250px;font-size:0.85rem;">${escapeHtml(r.response)}</div>
+      </div>`
+    ).join('');
+  } catch (e) {
+    spinner.style.display = 'none';
+    errDiv.textContent = `Error: ${e.message}`;
+  }
+}
+
+// ── Ingest ──
+async function runIngest() {
+  const source = document.getElementById('ingestSource').value.trim();
+  if (!source) { document.getElementById('ingestResult').innerHTML = '<span class="error">Please provide a source.</span>'; return; }
+
+  const pipeline = document.getElementById('ingestPipeline').value;
+  const sourceType = document.getElementById('ingestSourceType').value;
+
+  const spinner = document.getElementById('ingestSpinner');
+  const resultDiv = document.getElementById('ingestResult');
+  spinner.style.display = 'inline-flex';
+  resultDiv.innerHTML = '';
+
+  try {
+    const res = await fetch(`${INGESTION_API}/ingest`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source, source_type: sourceType, pipeline }),
+    });
+    const data = await res.json();
+    spinner.style.display = 'none';
+
+    if (!res.ok) { resultDiv.innerHTML = `<span class="error">${data.detail || 'Ingest failed'}</span>`; return; }
+
+    resultDiv.innerHTML = `
+      <span class="success">✓ Ingested ${data.document_count} documents → ${data.chunk_count} chunks → ${data.embedding_count} embeddings</span>
+      <br><small>Pipeline: ${data.pipeline} | Collection: ${data.collection_name || 'rag_documents'} | Status: ${data.status}</small>
+    `;
+  } catch (e) {
+    spinner.style.display = 'none';
+    resultDiv.innerHTML = `<span class="error">Error: ${e.message}</span>`;
+  }
+}
+
+// ── Logs ──
+async function loadLogs() {
+  const pipeline = document.getElementById('logPipelineFilter').value;
+  const url = pipeline ? `${API}/logs?pipeline=${encodeURIComponent(pipeline)}` : `${API}/logs`;
+
+  try {
+    const res = await fetch(url);
+    const data = await res.json();
+    const logs = data.logs || data || [];
+    const tbody = document.getElementById('logBody');
+    tbody.innerHTML = logs.map(l =>
+      `<tr>
+        <td style="font-size:0.8rem;color:var(--text2);">${l.created_at ? new Date(l.created_at).toLocaleTimeString() : ''}</td>
+        <td><span class="pipeline-tag">${l.pipeline || ''}</span></td>
+        <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(l.query || '')}</td>
+        <td style="font-size:0.8rem;color:var(--accent2);">${l.method || ''}</td>
+        <td style="font-size:0.85rem;">${l.total_time_ms ? l.total_time_ms.toFixed(0) : '-'}</td>
+        <td style="font-size:0.85rem;">${l.chunk_count || 0}</td>
+      </tr>`
+    ).join('');
+  } catch (e) {
+    console.error('loadLogs:', e);
+  }
+}
+
+// ── Utils ──
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+// ── Init ──
+(async function init() {
+  await refreshHealth();
+  await loadPipelines();
+  await loadStrategies();
+  await loadLogs();
+})();
+</script>
+</body>
+</html>

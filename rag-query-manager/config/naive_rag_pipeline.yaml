@@ -1,0 +1,30 @@
+pipeline:
+  name: naive_rag_pipeline
+  description: Simple single-pass dense retrieval — fastest baseline
+
+  stages:
+    knowledge_store:
+      strategy: qdrant_store
+      config:
+        collection_name: rag_documents
+        validate: true
+
+    retrieval:
+      strategy: naive_rag
+      config:
+        top_k: 5
+
+    reranking:
+      strategy: pass_through
+      config:
+        top_k: 5
+
+    response:
+      strategy: contextual_response
+      config:
+        model: llama-3.3-70b-versatile
+        temperature: 0.3
+        max_tokens: 1024
+        system_prompt: |
+          You are a helpful RAG assistant. Answer based ONLY on the provided context.
+          If the context doesn't contain enough information, say so clearly.

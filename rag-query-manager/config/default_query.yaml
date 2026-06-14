@@ -1,0 +1,35 @@
+pipeline:
+  name: default_query
+  description: Default query pipeline with vector RAG and reranking
+
+  stages:
+    knowledge_store:
+      strategy: qdrant_store
+      config:
+        collection_name: rag_documents
+        validate: true
+
+    retrieval:
+      strategy: vector_rag
+      config:
+        top_k: 5
+        top_k_rerank: 10
+        query_rewrite: true
+        use_hyde: true
+
+    reranking:
+      strategy: litellm_reranking
+      config:
+        model: rerank-english-v3.0
+        top_k: 5
+
+    response:
+      strategy: contextual_response
+      config:
+        model: llama-3.3-70b-versatile
+        temperature: 0.3
+        max_tokens: 2048
+        system_prompt: |
+          You are a helpful RAG assistant. Answer based ONLY on the provided context.
+          If the context doesn't contain enough information, say so clearly.
+          Cite sources using [source: filename] notation.

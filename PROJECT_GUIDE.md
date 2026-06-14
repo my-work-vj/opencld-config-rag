@@ -70,6 +70,45 @@ uvicorn api.main:app --reload
 ```
 - The FastAPI docs are available at `http://localhost:8000/docs`.
 
+## Pipeline Configuration (YAML)
+
+The `multi-rag-manager/config/` folder contains **pipeline blueprints** — YAML files that define which strategy to use at each of the 7 pipeline stages and what parameters to pass. This makes the RAG pipeline fully configurable without touching any code.
+
+### Files
+
+| File | Retrieval Strategy | Description |
+|---|---|---|
+| `default_pipeline.yaml` | `naive_rag` | Simple dense retrieval, no rewriting, no reranking — fastest |
+| `naive_rag_pipeline.yaml` | `naive_rag` | Same as default (explicit alias) |
+| `vector_rag_pipeline.yaml` | `vector_rag` | HyDE query expansion + LiteLLM cross-encoder reranking |
+| `hybrid_rag_pipeline.yaml` | `hybrid_bm25_vector` | BM25 + dense vector with RRF fusion + reranking — best quality |
+
+### Structure
+
+Every YAML follows the same shape:
+
+```yaml
+pipeline:
+  name: <pipeline_name>
+  description: <human-readable description>
+  stages:
+    ingestion:       # text_ingestion / pdf_ingestion / web_ingestion
+    chunking:        # recursive_chunking / fixed_size_chunking
+    embedding:       # litellm_embedding
+    indexing:        # qdrant_indexing
+    retrieval:       # naive_rag / vector_rag / hybrid_bm25_vector
+    reranking:       # pass_through / litellm_reranking
+    response:        # contextual_response
+```
+
+Each stage declares a `strategy` name and a `config` dict. The config keys are passed as `**kwargs` to that strategy's methods at runtime.
+
+### How they are loaded
+
+On server startup (`main.py`), the framework scans `config/*.yaml`, parses each file into a `PipelineConfig` object, and registers them in an in-memory registry. When you call `POST /api/v1/query` with `"pipeline": "hybrid"`, the API loads the corresponding YAML blueprint, assembles a `RAGPipeline` from it, and runs each stage sequentially.
+
+The `default_pipeline.yaml` acts as the fallback when no explicit pipeline name is provided (e.g. during `/ingest` when `pipeline` is omitted from the request body).
+
 ## API Usage
 All API endpoints are prefixed with **`/api/v1`**. The base URL for the running server is `http://localhost:8000`.
 

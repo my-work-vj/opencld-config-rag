@@ -1,0 +1,37 @@
+pipeline:
+  name: hybrid_rag_pipeline
+  description: BM25 + dense vector retrieval with RRF fusion and reranking
+
+  stages:
+    knowledge_store:
+      strategy: qdrant_store
+      config:
+        collection_name: rag_documents
+        validate: true
+
+    retrieval:
+      strategy: hybrid_bm25_vector
+      config:
+        top_k: 5
+        dense_weight: 0.5
+        sparse_weight: 0.5
+        rrf_k: 60
+        bm25_k1: 1.5
+        bm25_b: 0.75
+
+    reranking:
+      strategy: litellm_reranking
+      config:
+        model: rerank-english-v3.0
+        top_k: 5
+
+    response:
+      strategy: contextual_response
+      config:
+        model: llama-3.3-70b-versatile
+        temperature: 0.3
+        max_tokens: 2048
+        system_prompt: |
+          You are a helpful RAG assistant. Answer based ONLY on the provided context.
+          If the context doesn't contain enough information, say so clearly.
+          Cite sources using [source: filename] notation.

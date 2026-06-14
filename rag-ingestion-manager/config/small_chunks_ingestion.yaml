@@ -1,0 +1,30 @@
+# Smaller chunks for fine-grained retrieval
+pipeline:
+  name: small_chunks_ingestion
+  description: Ingestion with smaller chunks and higher overlap
+
+  stages:
+    ingestion:
+      strategy: text_ingestion
+      config:
+        encoding: utf-8
+
+    chunking:
+      strategy: fixed_size_chunking
+      config:
+        chunk_size: 512
+        chunk_overlap: 100
+
+    embedding:
+      strategy: litellm_embedding
+      config:
+        model: nvidia-embed
+        dimensions: 2048
+
+    indexing:
+      strategy: qdrant_indexing
+      config:
+        collection_name: rag_documents_small
+        vector_size: 2048
+        distance: Cosine
+        recreate: false

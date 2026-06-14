@@ -1,0 +1,31 @@
+# Default ingestion pipeline — ingest through Qdrant indexing
+pipeline:
+  name: default_ingestion
+  description: Standard ingestion pipeline with recursive chunking and Qdrant indexing
+
+  stages:
+    ingestion:
+      strategy: text_ingestion
+      config:
+        encoding: utf-8
+
+    chunking:
+      strategy: recursive_chunking
+      config:
+        chunk_size: 1000
+        chunk_overlap: 200
+        separators: ["\n\n", "\n", ". ", " ", ""]
+
+    embedding:
+      strategy: litellm_embedding
+      config:
+        model: nvidia-embed
+        dimensions: 2048
+
+    indexing:
+      strategy: qdrant_indexing
+      config:
+        collection_name: rag_documents
+        vector_size: 2048
+        distance: Cosine
+        recreate: false
