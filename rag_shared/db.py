@@ -33,6 +33,61 @@ def get_db():
 
 
 def init_pipeline_tables():
-    """Create shared pipeline tables."""
-    from rag_shared.models import RagPipeline, RagPipelineAudit  # noqa: F401
+    """Create shared pipeline and knowledge tables."""
+    from rag_shared.models import (
+        Agent,
+        CollectionConnector,
+        ConnectorFile,
+        DataConnector,
+        IndexedDocument,
+        KnowledgeBase,
+        KnowledgeSource,
+        PromptTemplate,
+        PromptVersion,
+        RagPipeline,
+        RagPipelineAudit,
+    )
     Base.metadata.create_all(bind=engine)
+    _migrate_agent_columns()
+
+
+def _migrate_agent_columns():
+    """Add new agent columns and migrate legacy single-KB data."""
+    from sqlalchemy import inspect, text
+
+    insp = inspect(engine)
+    if "agents" not in insp.get_table_names():
+        return
+
+    existing = {c["name"] for c in insp.get_columns("agents")}
+    alters = []
+    new_cols = {
+        "knowledge_base_names": "JSONB DEFAULT '[]'::jsonb",
+        "prompt_template_id": "VARCHAR(255)",
+        "prompt_version": "INTEGER",
+        "response_strategy": "VARCHAR(100) DEFAULT 'contextual_response'",
+        "query_stages": "JSONB DEFAULT '{}'::jsonb",
+        "yaml_exported_at": "TIMESTAMP WITH TIME ZONE",
+        "yaml_hash": "VARCHAR(64)",
+    }
+    for col, typedef in new_cols.items():
+        if col not in existing:
+            alters.append(f"ADD COLUMN {col} {typedef}")
+
+    if alters:
+        with engine.begin() as conn:
+            conn.execute(text(f"ALTER TABLE agents {', '.join(alters)}"))
+
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                UPDATE agents
+                SET knowledge_base_names = jsonb_build_array(knowledge_base_name)
+                WHERE knowledge_base_name IS NOT NULL
+                  AND (knowledge_base_names IS NULL
+                       OR knowledge_base_names = '[]'::jsonb
+                       OR knowledge_base_names = 'null'::jsonb)
+                """
+            )
+        )

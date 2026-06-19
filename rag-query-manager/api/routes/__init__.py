@@ -1,4 +1,4 @@
-"""Query API routes — runtime loads pipeline config from shared DB."""
+"""Query API routes — collection and agent driven runtime config."""
 
 import os
 import time
@@ -17,8 +17,10 @@ from api.models import (
     CompareQueryRequest, CompareResult, CompareResponse, StatusResponse,
 )
 from rag_shared.db import SessionLocal as SharedSession
-from rag_shared.loader import load_query_config
-from rag_shared.repo import PipelineNotFoundError, PipelineRepo
+from rag_shared.collection_loader import load_collection_query_config
+from rag_shared.defaults import DEFAULT_QUERY_STAGES, clone_stage_map
+from rag_shared.knowledge_repo import KnowledgeSourceNotFoundError
+from rag_shared.strategy_options import merge_strategy_options
 
 load_dotenv()
 
@@ -26,12 +28,26 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-def _load_pipeline_config(pipeline_id: str) -> dict:
+def _load_query_config_for_request(collection_name: str | None) -> dict:
+    if not collection_name:
+        return {
+            "pipeline": {
+                "id": "inline",
+                "name": "inline",
+                "description": "",
+                "stages": clone_stage_map(DEFAULT_QUERY_STAGES),
+                "embedding_model": "",
+                "chat_model": "",
+                "reranker_model": "",
+                "llm_params": {},
+                "status": "active",
+            }
+        }
     db = SharedSession()
     try:
-        return load_query_config(db, pipeline_id)
-    except PipelineNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        return load_collection_query_config(db, collection_name)
+    except KnowledgeSourceNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     finally:
         db.close()
 
@@ -51,6 +67,9 @@ async def health():
     llm_ok = qdrant_ok = pg_ok = False
     collections = []
     pipeline_count = 0
+    ks_count = 0
+    kb_count = 0
+    agent_count = 0
 
     try:
         from openai import OpenAI
@@ -82,7 +101,10 @@ async def health():
             pg_ok = True
         db = SharedSession()
         try:
-            pipeline_count = len(PipelineRepo.list_all(db))
+            from rag_shared.models import Agent, KnowledgeBase, KnowledgeSource
+            ks_count = db.query(KnowledgeSource).count()
+            kb_count = db.query(KnowledgeBase).count()
+            agent_count = db.query(Agent).count()
         finally:
             db.close()
     except Exception:
@@ -95,12 +117,15 @@ async def health():
         postgres_available=pg_ok,
         pipeline_count=pipeline_count,
         collections=collections,
+        knowledge_source_count=ks_count,
+        knowledge_base_count=kb_count,
+        agent_count=agent_count,
     )
 
 
 @router.get("/strategies")
 async def list_strategies():
-    return StrategyRegistry.list_strategies()
+    return merge_strategy_options(StrategyRegistry.list_strategies())
 
 
 @router.get("/collections")
@@ -122,7 +147,8 @@ async def list_collections():
 
 @router.post("/query", response_model=QueryResponse)
 async def query(req: QueryRequest):
-    config = _load_pipeline_config(req.pipeline)
+    source_name = req.collection or req.collection_name
+    config = _load_query_config_for_request(source_name)
     pipeline = QueryPipeline(config)
 
     ks_overrides = _build_overrides(req.knowledge_store_overrides, req.collection_name)
@@ -161,7 +187,7 @@ async def query(req: QueryRequest):
     try:
         db = SessionLocal()
         log = QueryLog(
-            pipeline_name=req.pipeline,
+            pipeline_name=source_name or "inline",
             collection_name=collection,
             query=req.query,
             retrieval_method=method,
@@ -181,7 +207,7 @@ async def query(req: QueryRequest):
 
     return QueryResponse(
         query=req.query,
-        pipeline=req.pipeline,
+        pipeline=source_name or "inline",
         pipeline_name=pipeline.name,
         collection_name=collection,
         response=ctx.response,
@@ -194,37 +220,10 @@ async def query(req: QueryRequest):
 
 @router.post("/compare", response_model=CompareResponse)
 async def compare(req: CompareQueryRequest):
-    results = []
-    for pipeline_id in req.pipelines:
-        try:
-            config = _load_pipeline_config(pipeline_id)
-            pipeline = QueryPipeline(config)
-            ks_overrides = _build_overrides(None, req.collection_name)
-            t0 = time.time()
-            ctx = pipeline.run(
-                query=req.query,
-                knowledge_store_overrides=ks_overrides,
-                retrieval_overrides={"config": {"top_k": req.top_k}},
-            )
-            elapsed = (time.time() - t0) * 1000
-            methods = set(r.retrieval_method for r in ctx.retrieved_chunks)
-            method = "+".join(sorted(methods))
-            results.append(CompareResult(
-                pipeline=pipeline_id,
-                response=ctx.response,
-                chunk_count=len(ctx.retrieved_chunks),
-                retrieval_method=method,
-                timings={**ctx.state.get("timings", {}), "total_ms": elapsed},
-            ))
-        except Exception as e:
-            results.append(CompareResult(
-                pipeline=pipeline_id,
-                response=f"Error: {e}",
-                chunk_count=0,
-                retrieval_method="error",
-                timings={},
-            ))
-    return CompareResponse(query=req.query, results=results)
+    raise HTTPException(
+        status_code=410,
+        detail="Pipeline comparison was removed. Create agents with different query stage configs instead.",
+    )
 
 
 @router.get("/logs")

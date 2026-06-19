@@ -16,7 +16,10 @@ class PipelineList(BaseModel):
 
 class QueryRequest(BaseModel):
     query: str = Field(..., description="The user query")
-    pipeline: str = Field("default_rag", description="Pipeline ID from shared database")
+    collection: Optional[str] = Field(
+        None,
+        description="Collection (knowledge source) name — loads its query stage config",
+    )
     collection_name: Optional[str] = Field(None, description="Override Qdrant collection")
     top_k: Optional[int] = Field(5, description="Number of chunks to retrieve")
     knowledge_store_overrides: Optional[dict[str, Any]] = None
@@ -74,3 +77,6 @@ class StatusResponse(BaseModel):
     postgres_available: bool
     pipeline_count: int
     collections: list[str]
+    knowledge_source_count: int = 0
+    knowledge_base_count: int = 0
+    agent_count: int = 0

@@ -26,7 +26,8 @@ from fastapi.staticfiles import StaticFiles
 from core.db import init_db
 from core.registry import StrategyRegistry
 from api.routes import router as api_router
-from rag_shared.routes import create_pipeline_router
+from api.routes.knowledge import router as knowledge_router
+from api.routes.prompts import router as prompts_router
 
 logging.basicConfig(
     level=logging.INFO,
@@ -52,7 +53,7 @@ async def lifespan(app: FastAPI):
     for stage, strats in StrategyRegistry.list_strategies().items():
         logger.info(f"  Stage '{stage}': {', '.join(strats)}")
 
-    logger.info("Run scripts/seed_db.py to load pipelines/*.yaml into DB")
+    logger.info("Query agents use per-collection stage config from knowledge sources")
     logger.info("=" * 60)
     yield
     logger.info("Shutting down RAG Query Manager")
@@ -60,7 +61,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="RAG Query Manager",
-    description="Query pipeline with hybrid YAML seed + database runtime config.",
+    description="Query service with per-collection and per-agent stage configuration.",
     version="2.0.0",
     lifespan=lifespan,
 )
@@ -73,8 +74,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(create_pipeline_router(), prefix="/api/v1")
 app.include_router(api_router, prefix="/api/v1")
+app.include_router(knowledge_router, prefix="/api/v1")
+app.include_router(prompts_router, prefix="/api/v1")
 
 ui_dir = Path(__file__).parent.parent / "ui"
 if ui_dir.exists():

@@ -1,4 +1,4 @@
-"""Ingestion API routes — runtime loads pipeline config from shared DB."""
+"""Ingestion API routes — collection-driven runtime config."""
 
 import os
 import logging
@@ -10,10 +10,12 @@ from core.registry import StrategyRegistry
 from core.pipeline import IngestionPipeline
 from core.db import SessionLocal, init_db
 from core.models import DocumentRecord
-from api.models import IngestRequest, IngestResponse, StatusResponse
+from api.models import IngestRequest, IngestResponse, PathwayDockerHealthResponse, StatusResponse
 from rag_shared.db import SessionLocal as SharedSession
-from rag_shared.loader import load_ingestion_config
-from rag_shared.repo import PipelineNotFoundError, PipelineRepo
+from rag_shared.collection_loader import load_collection_ingestion_config
+from rag_shared.defaults import DEFAULT_INGESTION_STAGES, clone_stage_map
+from rag_shared.knowledge_repo import KnowledgeSourceNotFoundError, KnowledgeSourceRepo
+from rag_shared.strategy_options import merge_strategy_options
 
 load_dotenv()
 
@@ -21,21 +23,12 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-def _load_pipeline_config(pipeline_id: str) -> dict:
-    db = SharedSession()
-    try:
-        return load_ingestion_config(db, pipeline_id)
-    except PipelineNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    finally:
-        db.close()
-
-
 @router.get("/health", response_model=StatusResponse)
 async def health():
     llm_ok = qdrant_ok = pg_ok = False
     collections = []
     pipeline_count = 0
+    ks_count = 0
 
     try:
         from openai import OpenAI
@@ -67,29 +60,62 @@ async def health():
             pg_ok = True
         db = SharedSession()
         try:
-            pipeline_count = len(PipelineRepo.list_all(db))
+            from rag_shared.models import KnowledgeSource
+            ks_count = db.query(KnowledgeSource).count()
         finally:
             db.close()
     except Exception:
         pass
 
+    pathway_ready = False
+    pathway_message = ""
+    try:
+        from connectors.pathway.container import get_status
+        pw_status = get_status()
+        pathway_ready = pw_status.ready
+        pathway_message = pw_status.message
+    except Exception as exc:
+        pathway_message = str(exc)
+
+    core_ok = all([llm_ok, qdrant_ok, pg_ok])
+    overall = "healthy" if core_ok and pathway_ready else "degraded"
+
     return StatusResponse(
-        status="healthy" if all([llm_ok, qdrant_ok, pg_ok]) else "degraded",
+        status=overall,
         llm_available=llm_ok,
         qdrant_available=qdrant_ok,
         postgres_available=pg_ok,
+        pathway_docker_ready=pathway_ready,
+        pathway_docker_message=pathway_message,
         pipeline_count=pipeline_count,
         collections=collections,
+        knowledge_source_count=ks_count,
+        knowledge_base_count=0,
+        agent_count=0,
     )
+
+
+@router.get("/connectors/pathway/health", response_model=PathwayDockerHealthResponse)
+async def pathway_docker_health():
+    from connectors.pathway.container import get_status
+    status = get_status()
+    return PathwayDockerHealthResponse(**status.as_dict())
+
+
+@router.post("/connectors/pathway/start", response_model=PathwayDockerHealthResponse)
+async def pathway_docker_start():
+    from connectors.pathway.docker_runner import bootstrap_pathway
+    result = bootstrap_pathway()
+    return PathwayDockerHealthResponse(**result)
 
 
 @router.get("/strategies")
 async def list_strategies():
-    return StrategyRegistry.list_strategies()
+    return merge_strategy_options(StrategyRegistry.list_strategies())
 
 
-@router.get("/collections")
-async def list_collections():
+@router.get("/qdrant/collections")
+async def list_qdrant_collections():
     try:
         from qdrant_client import QdrantClient
         qc = QdrantClient(
@@ -107,7 +133,28 @@ async def list_collections():
 
 @router.post("/ingest", response_model=IngestResponse)
 async def ingest(req: IngestRequest):
-    config = _load_pipeline_config(req.pipeline)
+    db = SharedSession()
+    try:
+        if req.collection:
+            config = load_collection_ingestion_config(db, req.collection)
+        else:
+            config = {
+                "pipeline": {
+                    "id": "inline",
+                    "name": "inline",
+                    "description": "",
+                    "stages": clone_stage_map(DEFAULT_INGESTION_STAGES),
+                    "embedding_model": "",
+                    "chat_model": "",
+                    "reranker_model": "",
+                    "llm_params": {},
+                    "status": "active",
+                }
+            }
+    except KnowledgeSourceNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    finally:
+        db.close()
 
     if req.source_type == "pdf":
         config["pipeline"]["stages"]["ingestion"] = {
@@ -147,7 +194,7 @@ async def ingest(req: IngestRequest):
         document_count=len(ctx.documents),
         chunk_count=len(ctx.chunks),
         embedding_count=len(ctx.embeddings),
-        pipeline=req.pipeline,
+        pipeline=req.collection or "inline",
         pipeline_name=pipeline.name,
         collection_name=collection_name,
         status="success",

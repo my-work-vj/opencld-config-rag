@@ -55,11 +55,15 @@ class ContextualResponse(BaseResponseStrategy):
 
         context = self._build_context(context_chunks)
 
-        user_prompt = (
-            f"Context:\n{context}\n\n"
-            f"Question: {query}\n\n"
-            f"Answer based on the provided context:"
-        )
+        user_prompt_template = kwargs.get("user_prompt_template")
+        if user_prompt_template:
+            user_prompt = user_prompt_template.format(context=context, query=query)
+        else:
+            user_prompt = (
+                f"Context:\n{context}\n\n"
+                f"Question: {query}\n\n"
+                f"Answer based on the provided context:"
+            )
 
         try:
             resp = self.client.chat.completions.create(

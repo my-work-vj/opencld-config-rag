@@ -5,8 +5,8 @@ Three layers work together:
 | Layer | Role | Location |
 |-------|------|----------|
 | **Python strategies** | What each strategy *does* | `rag-ingestion-manager/strategies/`, `rag-query-manager/strategies/` |
-| **YAML (dev/CI)** | Human-readable presets, Git review, seeding | `pipelines/*.yaml` |
-| **PostgreSQL (runtime)** | Source of truth at query/ingest time | `rag_pipelines` table |
+| **YAML (dev/CI)** | Human-readable presets, Git review, seeding | `pipelines/`, `prompts/`, `agent_pipelines/` |
+| **PostgreSQL (runtime)** | Source of truth at query/ingest time | `rag_pipelines`, `prompt_templates`, `agents`, etc. |
 
 Both services read the **same database** (`POSTGRES_DB=rag_platform`). They never read YAML at runtime.
 
@@ -27,8 +27,10 @@ docker exec litellm_db psql -U llmproxy -d litellm -c "CREATE DATABASE rag_platf
 # 2. Env files are at repo root + both service folders (POSTGRES_DB=rag_platform)
 #    LITELLM_API_KEY=sk-vj  (must match a valid key in your LiteLLM proxy)
 
-# 3. Seed pipelines from YAML → database
+# 3. Seed all YAML → database
 python scripts/seed_db.py
+python scripts/seed_prompts.py
+python scripts/seed_agent_pipelines.py
 
 # 4. Start services
 cd rag-ingestion-manager && python -m api.main   # :8081
@@ -149,3 +151,43 @@ curl -X POST http://localhost:8082/api/v1/query \
   -H "Content-Type: application/json" \
   -d '{"query":"What is this about?","pipeline":"default_rag"}'
 ```
+
+## Prompt Templates (`prompts/`)
+
+Versioned system prompts for agents. Seeded via `python scripts/seed_prompts.py` or `POST /api/v1/prompt-templates/seed`. Auto-exported to `prompts/{id}.yaml` on create/update when `YAML_EXPORT_ENABLED=true`.
+
+## Agent Pipelines (`agent_pipelines/`)
+
+Named RAG agents: prompt template reference, multiple knowledge bases, and query stage strategies (retrieval, reranking, response). Seeded via `python scripts/seed_agent_pipelines.py` or `POST /api/v1/agents/seed`. Auto-exported on agent create/update.
+
+## Frontend apps
+
+Two separate React apps align with the split backend:
+
+| App | Port | Backend | Focus |
+|-----|------|---------|-------|
+| `rag-ingestion-frontend` | 3001 | :8081 | Sources, ingest, pipeline creation |
+| `rag-query-frontend` | 3000 | :8082 | KBs, prompts, agents, query, evaluator |
+
+### Ingestion routes (`rag-ingestion-frontend`)
+
+| Route | Purpose |
+|-------|---------|
+| `/sources` | Knowledge sources — create and ingest |
+| `/data-sources` | Pathway connectors (Google Drive; S3 planned) |
+| `/manager`, `/creator`, `/rag/:id` | Ingestion pipelines |
+
+### Query routes (`rag-query-frontend`)
+
+| Route | Purpose |
+|-------|---------|
+| `/knowledge-bases` | Group sources for retrieval |
+| `/prompts` | Prompt Manager (versioned templates) |
+| `/agents` | RAG agent pipelines |
+| `/manager`, `/rag/:id`, `/evaluator` | Query pipelines and evaluation |
+
+Query service exposes read-only `GET /knowledge-sources` so the KB UI can list sources without calling ingestion.
+
+## Bidirectional sync
+
+PostgreSQL is runtime truth. UI/API saves update the DB and export YAML files. Deploy/seed imports YAML back into the DB.

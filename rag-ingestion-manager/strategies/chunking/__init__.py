@@ -5,6 +5,16 @@ from typing import Optional
 
 from core.base_strategies import BaseChunkingStrategy, Document, Chunk
 from core.registry import StrategyRegistry
+from monitoring.chunk_ids import make_chunk_point_id
+
+
+def _chunk_id_for(doc: Document, chunk_index: int) -> str:
+    connector_id = doc.metadata.get("connector_id")
+    external_id = doc.metadata.get("external_id")
+    qdrant_collection = doc.metadata.get("qdrant_collection")
+    if connector_id and external_id and qdrant_collection:
+        return make_chunk_point_id(qdrant_collection, connector_id, external_id, chunk_index)
+    return str(uuid.uuid4())
 
 
 @StrategyRegistry.register("chunking", "recursive_chunking")
@@ -22,7 +32,7 @@ class RecursiveChunking(BaseChunkingStrategy):
             chunks = self._split_text(text, chunk_size, chunk_overlap, separators)
             for i, chunk_text in enumerate(chunks):
                 all_chunks.append(Chunk(
-                    id=str(uuid.uuid4()),
+                    id=_chunk_id_for(doc, i),
                     document_id=doc.id,
                     content=chunk_text,
                     metadata={**doc.metadata, "doc_index": i},
@@ -83,7 +93,7 @@ class FixedSizeChunking(BaseChunkingStrategy):
 
             for i, chunk_text in enumerate(chunks):
                 all_chunks.append(Chunk(
-                    id=str(uuid.uuid4()),
+                    id=_chunk_id_for(doc, i),
                     document_id=doc.id,
                     content=chunk_text,
                     metadata={**doc.metadata, "chunk_size": chunk_size},

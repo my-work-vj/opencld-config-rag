@@ -327,3 +327,6 @@ class HybridBM25VectorRetrieval(BaseRetrievalStrategy):
             f"→ {len(fused)} fused"
         )
         return fused
+
+
+from .multi_collection import MultiCollectionRetrieval  # noqa: F401

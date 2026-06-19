@@ -1,0 +1,17 @@
+# Pathway Docker worker for data source connector sync (Google Drive via pw.io.gdrive).
+#
+# Start:
+#   docker compose up -d pathway
+#
+# The ingestion manager also auto-starts this container on startup.
+
+services:
+  pathway:
+    image: ${PATHWAY_DOCKER_IMAGE:-pathwaycom/pathway:latest}
+    container_name: ${PATHWAY_CONTAINER_NAME:-opncld-rag-pathway}
+    restart: unless-stopped
+    volumes:
+      - ./rag-ingestion-manager/data/connectors:/data/connectors
+      - ./rag-ingestion-manager/connectors/pathway/scripts:/scripts:ro
+    working_dir: /data
+    entrypoint: ["sleep", "infinity"]

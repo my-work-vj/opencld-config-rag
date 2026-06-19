@@ -1,0 +1,12 @@
+prompt_template:
+  id: default_assistant
+  name: Default RAG Assistant
+  description: Standard helpful RAG assistant behaviour
+  active_version: 1
+  versions:
+    - version: 1
+      system_prompt: |
+        You are a helpful RAG assistant. Answer the user's question based ONLY on
+        the provided context. If the context doesn't contain enough information,
+        say so clearly. Cite sources using [source: filename] notation.
+      changelog: Initial version

@@ -19,13 +19,18 @@ import strategies.chunking    # noqa: F401
 import strategies.embedding   # noqa: F401
 import strategies.indexing    # noqa: F401
 
+import connectors  # noqa: F401 — register data source connector types
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from core.db import init_db
 from core.registry import StrategyRegistry
 from api.routes import router as api_router
-from rag_shared.routes import create_pipeline_router
+from api.routes.collections import router as collections_router
+from api.routes.data_connectors import router as data_connectors_router
+from api.routes.knowledge_bases import router as knowledge_bases_router
+from api.routes.knowledge_sources import router as knowledge_sources_router
 
 logging.basicConfig(
     level=logging.INFO,
@@ -41,6 +46,7 @@ async def lifespan(app: FastAPI):
     logger.info(f"PostgreSQL DB: {os.getenv('POSTGRES_DB', 'rag_platform')}")
     logger.info(f"LiteLLM: {os.getenv('LITELLM_BASE_URL', 'http://localhost:4000/v1')}")
     logger.info(f"Qdrant: {os.getenv('QDRANT_HOST', 'localhost')}:{os.getenv('QDRANT_PORT', '6333')}")
+    logger.info(f"Pathway Docker image: {os.getenv('PATHWAY_DOCKER_IMAGE', 'pathwaycom/pathway:latest')}")
 
     try:
         init_db()
@@ -48,10 +54,28 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Database init failed: {e}")
 
+    try:
+        from connectors.pathway.docker_runner import bootstrap_pathway
+        pw = bootstrap_pathway()
+        logger.info(
+            "Pathway Docker: %s (container=%s, running=%s)",
+            pw.get("message"),
+            pw.get("container_name"),
+            pw.get("container_running"),
+        )
+    except Exception as e:
+        logger.warning(f"Pathway Docker not ready: {e}")
+
+    try:
+        from monitoring.worker import start_monitor
+        start_monitor()
+    except Exception as e:
+        logger.warning(f"Collection monitor not started: {e}")
+
     for stage, strats in StrategyRegistry.list_strategies().items():
         logger.info(f"  Stage '{stage}': {', '.join(strats)}")
 
-    logger.info("Run scripts/seed_db.py to load pipelines/*.yaml into DB")
+    logger.info("Collections use inline stage config stored per collection")
     logger.info("=" * 60)
     yield
     logger.info("Shutting down RAG Ingestion Manager")
@@ -59,7 +83,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="RAG Ingestion Manager",
-    description="Ingestion pipeline with hybrid YAML seed + database runtime config.",
+    description="Ingestion service with per-collection stage configuration.",
     version="2.0.0",
     lifespan=lifespan,
 )
@@ -72,8 +96,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(create_pipeline_router(), prefix="/api/v1")
 app.include_router(api_router, prefix="/api/v1")
+app.include_router(knowledge_sources_router, prefix="/api/v1")
+app.include_router(collections_router, prefix="/api/v1")
+app.include_router(knowledge_bases_router, prefix="/api/v1")
+app.include_router(data_connectors_router, prefix="/api/v1")
 
 
 if __name__ == "__main__":
