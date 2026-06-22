@@ -12,3 +12,6 @@ build/
 .claude/
 plan.md
 data/connectors/
+**/credentials.json
+check_*.py
+test_*.py

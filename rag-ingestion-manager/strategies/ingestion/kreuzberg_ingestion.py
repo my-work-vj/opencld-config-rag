@@ -46,7 +46,8 @@ class KreuzbergIngestion(BaseIngestionStrategy):
                 logger.warning("Skipping non-file: %s", p)
                 continue
             try:
-                result = extract_file(str(p))
+                import asyncio
+                result = asyncio.run(extract_file(str(p)))
                 content = result.content or ""
                 if not content.strip():
                     logger.warning("Empty extraction from %s", p.name)
@@ -59,8 +60,8 @@ class KreuzbergIngestion(BaseIngestionStrategy):
                         "path": str(p),
                         "size": len(content),
                         "format": (
-                            str(result.metadata.format.format_type)
-                            if result.metadata and result.metadata.format
+                            str(result.metadata.get("format_type", p.suffix))
+                            if result.metadata
                             else p.suffix
                         ),
                         "source": "kreuzberg",
