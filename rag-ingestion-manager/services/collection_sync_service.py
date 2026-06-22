@@ -219,7 +219,7 @@ def sync_collection(knowledge_source_name: str) -> dict:
                 content_hash = file_content_hash(path)
                 existing = indexed_by_file_id.get(connector_file.id)
 
-                if existing and existing.content_hash == content_hash:
+                if existing and existing.content_hash == content_hash and existing.chunk_count > 0:
                     stats["unchanged"] += 1
                     continue
 
