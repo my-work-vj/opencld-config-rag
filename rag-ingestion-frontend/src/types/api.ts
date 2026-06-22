@@ -58,6 +58,13 @@ export type QdrantCollectionInfo = CollectionInfo
 
 export type StrategiesMap = Record<string, string[]>
 
+export type LlmModels = {
+  chat: string[]
+  embedding: string[]
+  rerank: string[]
+  _fallback?: boolean
+}
+
 export type IngestRequest = {
   source: string
   source_type: 'auto' | 'text' | 'pdf' | 'web'

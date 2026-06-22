@@ -27,6 +27,8 @@ interface RagStagesEditorProps {
   /** Currently selected ingestion mode */
   ingestionMode: IngestionMode
   onChangeIngestionMode: (mode: IngestionMode) => void
+  /** Available strategies keyed by stage name */
+  strategies?: Record<string, string[]>
 }
 
 export default function RagStagesEditor({
@@ -35,21 +37,13 @@ export default function RagStagesEditor({
   stageConfigs,
   onChangeStrategies,
   onChangeConfigs,
-  onChangeStages,
   embeddingModel,
   onChangeEmbeddingModel,
   llmModels,
   ingestionMode,
   onChangeIngestionMode,
+  strategies: allStrategies,
 }: RagStagesEditorProps) {
-  const handleStrategyChange = (stage: string, strategy: string) => {
-    onChangeStrategies({ ...stageStrategies, [stage]: strategy })
-  }
-
-  const handleConfigChange = (stage: string, raw: string) => {
-    onChangeConfigs({ ...stageConfigs, [stage]: raw })
-  }
-
   return (
     <div className="space-y-6">
       {/* ── Embedding model picker ── */}
@@ -83,7 +77,6 @@ export default function RagStagesEditor({
           Document source
         </label>
 
-        {/* Card row */}
         <div className="grid grid-cols-2 gap-3">
           <button
             type="button"
@@ -185,31 +178,29 @@ export default function RagStagesEditor({
         )}
       </div>
 
-      {/* ── Ingestion stage editors (only chunking shown) ── */}
+      {/* ── Ingestion stages (only chunking shown) ── */}
       {INGESTION_STAGE_NAMES.filter((s) => s !== 'ingestion').map(
         (stageName) => {
           const base = baseStages[stageName]
           if (!base) return null
           const strategy = stageStrategies[stageName] || base.strategy
-          const raw = stageConfigs[stageName] ?? stringifyStageConfig(base.config)
+          const configJson =
+            stageConfigs[stageName] ?? stringifyStageConfig(base.config)
 
           return (
-            <div key={stageName} className="space-y-2">
-              <label className="text-sm font-medium text-gray-700">
-                {STAGE_LABELS[stageName] ?? stageName}
-              </label>
-              <select
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                value={strategy}
-                onChange={(e) => handleStrategyChange(stageName, e.target.value)}
-              >
-                <option value={base.strategy}>{base.strategy}</option>
-              </select>
-              <StageConfigEditor
-                value={raw}
-                onChange={(v) => handleConfigChange(stageName, v)}
-              />
-            </div>
+            <StageConfigEditor
+              key={stageName}
+              stage={stageName}
+              strategies={allStrategies?.[stageName] ?? [base.strategy]}
+              strategy={strategy}
+              configJson={configJson}
+              onStrategyChange={(newStrategy) =>
+                onChangeStrategies({ ...stageStrategies, [stageName]: newStrategy })
+              }
+              onConfigChange={(newConfig) =>
+                onChangeConfigs({ ...stageConfigs, [stageName]: newConfig })
+              }
+            />
           )
         },
       )}

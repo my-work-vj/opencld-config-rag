@@ -39,6 +39,11 @@ export function CollectionDetailPage() {
     refetchInterval: 60_000,
   })
 
+  const strategies = useQuery({
+    queryKey: ['strategies'],
+    queryFn: api.strategies,
+  })
+
   const collection = useQuery({
     queryKey: ['vector-collection', decodedName],
     queryFn: () => api.vectorCollection(decodedName),
@@ -287,6 +292,7 @@ export function CollectionDetailPage() {
               llmModels={llmModels.data}
               ingestionMode={ingestionMode}
               onChangeIngestionMode={setIngestionMode}
+              strategies={strategies.data}
             />
             <Button onClick={handleSaveStages} isLoading={updateStagesMutation.isPending}>
               Save configuration

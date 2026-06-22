@@ -1,50 +1,30 @@
 import { API_BASE } from '@/lib/env'
 
 import type {
-
   CollectionListResponse,
-
   ConnectorFileListResponse,
-
   ConnectorType,
-
   CreateCollectionRequest,
-
   CreateDataConnectorInput,
-
   CreateKnowledgeBaseRequest,
-
   DataConnector,
-
   DataConnectorListResponse,
-
   DataConnectorSyncResponse,
   DataConnectorTestResponse,
   DataConnectorUploadResponse,
   IndexedDocumentListResponse,
-
   HealthResponse,
-
+  LlmModels,
   PathwayDockerHealth,
-
   IngestRequest,
-
   IngestResponse,
-
   KnowledgeBase,
-
   KnowledgeBaseListResponse,
-
   KnowledgeSource,
-
   KnowledgeSourceIngestRequest,
-
   KnowledgeSourceIngestResponse,
-
   QdrantCollectionInfo,
-
   StrategiesMap,
-
   UpdateCollectionRequest,
 } from '@/types/api'
 
@@ -132,6 +112,8 @@ export const api = {
     request<PathwayDockerHealth>('/connectors/pathway/start', { method: 'POST' }),
 
   strategies: () => request<StrategiesMap>('/strategies'),
+
+  llmModels: () => request<LlmModels>('/llm/models'),
 
   qdrantCollections: () => request<QdrantCollectionInfo[]>('/qdrant/collections'),
 

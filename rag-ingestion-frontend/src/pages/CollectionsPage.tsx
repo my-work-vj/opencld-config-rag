@@ -32,6 +32,11 @@ export function CollectionsPage() {
     queryFn: async () => (await api.vectorCollections()).collections,
   })
 
+  const strategies = useQuery({
+    queryKey: ['strategies'],
+    queryFn: api.strategies,
+  })
+
   const dataSources = useQuery({
     queryKey: ['data-sources'],
     queryFn: async () => (await api.dataSources()).data_sources,
@@ -199,6 +204,7 @@ export function CollectionsPage() {
               llmModels={llmModels.data}
               ingestionMode={ingestionMode}
               onChangeIngestionMode={setIngestionMode}
+              strategies={strategies.data}
             />
 
             {error && <p className="text-sm text-red-400" role="alert">{error}</p>}

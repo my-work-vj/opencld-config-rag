@@ -114,6 +114,79 @@ async def list_strategies():
     return merge_strategy_options(StrategyRegistry.list_strategies())
 
 
+@router.get("/llm/models")
+async def list_llm_models():
+    """Fetch models from LiteLLM proxy categorized by mode (chat, embedding, rerank)."""
+    try:
+        from openai import OpenAI
+        client = OpenAI(
+            base_url=os.getenv("LITELLM_BASE_URL", "http://localhost:4000/v1"),
+            api_key=os.getenv("LITELLM_API_KEY", "sk-vj"),
+        )
+        try:
+            resp = client.models.list()
+            models_list = [m.id for m in resp.data]
+            return {
+                "chat": sorted([m for m in models_list if "embed" not in m.lower() and "rerank" not in m.lower()]),
+                "embedding": sorted([m for m in models_list if "embed" in m.lower()]),
+                "rerank": sorted([m for m in models_list if "rerank" in m.lower()]),
+                "_fallback": False,
+            }
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+    # Try explicit /v1/model/info for richer categorization
+    try:
+        import json, urllib.request
+
+        base = os.getenv("LITELLM_BASE_URL", "http://localhost:4000/v1")
+        api_key = os.getenv("LITELLM_API_KEY", "sk-vj")
+        info_url = base.rstrip("/").rstrip("v1").rstrip("/") + "/model/info"
+
+        req = urllib.request.Request(
+            info_url,
+            headers={"Authorization": f"Bearer {api_key}"},
+        )
+        with urllib.request.urlopen(req, timeout=10) as r:
+            data = json.loads(r.read())
+
+        categorized: dict[str, list[str]] = {"chat": [], "embedding": [], "rerank": []}
+        for item in data.get("data", []):
+            name = item.get("model_name", "")
+            mode = (item.get("model_info") or {}).get("mode", "")
+            if mode == "chat":
+                categorized["chat"].append(name)
+            elif mode == "embedding":
+                categorized["embedding"].append(name)
+            elif mode == "rerank":
+                categorized["rerank"].append(name)
+            else:
+                # fallback: guess from name
+                lower = name.lower()
+                if "rerank" in lower:
+                    categorized["rerank"].append(name)
+                elif "embed" in lower:
+                    categorized["embedding"].append(name)
+                else:
+                    categorized["chat"].append(name)
+
+        for k in categorized:
+            categorized[k] = sorted(set(categorized[k]))
+        categorized["_fallback"] = False
+        return categorized
+    except Exception as exc:
+        logger.warning(f"Could not fetch LiteLLM models: {exc}")
+
+    return {
+        "chat": ["llama-3.3-70b-versatile", "gpt-4o-mini", "gpt-4o"],
+        "embedding": ["nvidia-embed", "text-embedding-3-small"],
+        "rerank": ["rerank-english-v3.0"],
+        "_fallback": True,
+    }
+
+
 @router.get("/qdrant/collections")
 async def list_qdrant_collections():
     try:
