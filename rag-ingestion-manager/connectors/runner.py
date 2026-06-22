@@ -6,7 +6,7 @@ import logging
 import os
 from pathlib import Path
 
-from connectors.pathway.container import container_to_host_path
+from connectors.pathway.container import container_to_host_path, copy_files_from_container
 from connectors import ConnectorRegistry
 from connectors.registry import ConnectorNotFoundError
 from rag_shared.connector_file_repo import ConnectorFileRepo
@@ -102,6 +102,8 @@ def run_connector_sync(connector_id: str) -> dict:
             credentials_path=credentials_path,
             files_dir=files_dir,
         )
+        # Copy synced files from container (Windows fs) to WSL host path
+        copy_files_from_container(connector_id, files_dir)
         db = SharedSession()
         try:
             if result.get("object_id"):

@@ -99,12 +99,31 @@ def _run(cmd: list[str], timeout: int = 120, cwd: str | None = None) -> subproce
 
 
 def check_docker() -> tuple[bool, str]:
+    # Try local Docker daemon first
     try:
         result = _run(["docker", "version"], timeout=30)
     except FileNotFoundError:
         return False, "Docker is not installed or not on PATH"
     if result.returncode != 0:
-        return False, (result.stderr or result.stdout or "Docker is not running").strip()
+        err = (result.stderr or result.stdout or "Docker is not running").strip()
+        # If local daemon failed, try DOCKER_HOST env var (Windows Docker Desktop via TCP)
+        docker_host = os.environ.get("DOCKER_HOST", "").strip()
+        if docker_host:
+            env = dict(os.environ, DOCKER_HOST=docker_host)
+            try:
+                result2 = subprocess.run(
+                    ["docker", "version"],
+                    capture_output=True, text=True, timeout=30,
+                    env=env, check=False,
+                )
+                if result2.returncode == 0:
+                    return True, f"Docker is available via {docker_host}"
+            except Exception:
+                pass
+        # Check if the container might be running on Windows host (Hermes sandbox)
+        if "cannot connect" in err.lower() or "daemon" in err.lower():
+            return False, "Docker daemon runs on Windows host (not accessible from sandbox)"
+        return False, err
     return True, "Docker is available"
 
 
@@ -129,7 +148,7 @@ def get_status() -> PathwayDockerStatus:
     name = container_name()
     docker_ok, docker_msg = check_docker()
     image_present = check_image_present(image) if docker_ok else False
-    running, container_status = get_container_state(name) if docker_ok else (False, "unknown")
+    running, container_status = get_container_state(name) if docker_ok else (False, "docker-unavailable")
 
     if not docker_ok:
         message = docker_msg
@@ -216,4 +235,54 @@ def ensure_container_running() -> PathwayDockerStatus:
 def stop_container() -> None:
     name = container_name()
     _run(["docker", "stop", name], timeout=60)
+
+
+def copy_files_from_container(connector_id: str, host_files_dir: Path) -> int:
+    """Copy synced files from the Pathway container (Windows fs) to the WSL host path.
+
+    The sync script (gdrive_sync.py) writes files inside the container at
+    /data/connectors/{connector_id}/files/. Because the container volume is
+    mounted from the Windows host, those files are invisible from WSL. This
+    function copies them back to the WSL host path using docker cp.
+    Returns the number of files copied.
+    """
+    import subprocess
+    docker_host = os.environ.get("DOCKER_HOST", "").strip()
+    env = {**os.environ, "DOCKER_HOST": docker_host} if docker_host else None
+    name = container_name()
+    container_files_dir = f"/data/connectors/{connector_id}/files"
+
+    # List files in the container's output directory
+    result = subprocess.run(
+        ["docker", "exec", name, "ls", "-1", container_files_dir],
+        capture_output=True, text=True, timeout=30, env=env,
+    )
+    if result.returncode != 0:
+        logger.info("No files to copy from container (returncode=%s)", result.returncode)
+        return 0
+
+    filenames = [f.strip() for f in result.stdout.splitlines() if f.strip()]
+    if not filenames:
+        return 0
+
+    host_files_dir.mkdir(parents=True, exist_ok=True)
+    copied = 0
+    for fname in filenames:
+        src = f"{name}:{container_files_dir}/{fname}"
+        dst = str(host_files_dir / fname)
+        try:
+            cp_result = subprocess.run(
+                ["docker", "cp", src, dst],
+                capture_output=True, text=True, timeout=60, env=env,
+            )
+            if cp_result.returncode == 0:
+                copied += 1
+            else:
+                logger.warning("Failed to copy %s: %s", fname, cp_result.stderr.strip())
+        except Exception as exc:
+            logger.warning("Failed to copy %s: %s", fname, exc)
+
+    if copied:
+        logger.info("Copied %d/%d file(s) from Pathway container to host", copied, len(filenames))
+    return copied
 

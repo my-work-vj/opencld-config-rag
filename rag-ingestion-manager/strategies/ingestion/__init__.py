@@ -4,8 +4,11 @@ import os
 import uuid
 from pathlib import Path
 
+import logging
 from core.base_strategies import BaseIngestionStrategy, Document
 from core.registry import StrategyRegistry
+
+logger = logging.getLogger(__name__)
 
 
 @StrategyRegistry.register("ingestion", "text_ingestion")
@@ -30,7 +33,7 @@ class TextIngestion(BaseIngestionStrategy):
                         )
                         documents.append(doc)
                     except Exception as e:
-                        print(f"  Skipping {p}: {e}")
+                        logger.warning("Skipping %s: %s", p, e)
         elif isinstance(source, str):
             # Raw text
             doc = Document(
@@ -83,7 +86,7 @@ class PDFIngestion(BaseIngestionStrategy):
                     try:
                         text += page.extract_text() or ""
                     except Exception as e:
-                        print(f"  Warning: skipping page {i+1} in {p.name}: {e}")
+                        logger.warning("Skipping page %s in %s: %s", i+1, p.name, e)
                 doc = Document(
                     id=str(uuid.uuid4()),
                     content=text,
@@ -92,7 +95,7 @@ class PDFIngestion(BaseIngestionStrategy):
                 )
                 documents.append(doc)
             except Exception as e:
-                print(f"  Skipping {p.name}: {e}")
+                logger.warning("Skipping %s: %s", p.name, e)
 
         return documents
 

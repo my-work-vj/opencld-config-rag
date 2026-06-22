@@ -12,6 +12,7 @@ from pathlib import Path
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from connectors.google_drive import parse_credentials
+from connectors.pathway.container import container_name
 from connectors.registry import ConnectorNotFoundError, ConnectorRegistry
 from connectors.runner import (
     connector_supports_ui_upload,
@@ -48,6 +49,29 @@ def _connectors_root() -> Path:
     root = _CONNECTORS_DIR
     root.mkdir(parents=True, exist_ok=True)
     return root
+
+
+def _sync_credentials_to_container(connector_id: str, cred_path: Path) -> None:
+    """Copy credentials into the Pathway container (WSL→Docker Desktop cross-filesystem)."""
+    import subprocess
+    docker_host = os.environ.get("DOCKER_HOST", "").strip()
+    env = {**os.environ, "DOCKER_HOST": docker_host} if docker_host else None
+    name = container_name()
+    try:
+        subprocess.run(
+            ["docker", "exec", name, "mkdir", "-p", f"/data/connectors/{connector_id}"],
+            capture_output=True, timeout=30, env=env,
+        )
+        result = subprocess.run(
+            ["docker", "cp", str(cred_path), f"{name}:/data/connectors/{connector_id}/credentials.json"],
+            capture_output=True, timeout=30, env=env,
+        )
+        if result.returncode == 0:
+            logger.info("Synced credentials to Pathway container %s", name)
+        else:
+            logger.warning("Failed to copy credentials to container: %s", (result.stderr or result.stdout).strip())
+    except Exception as exc:
+        logger.warning("Could not sync credentials to Pathway container: %s", exc)
 
 
 def _to_info(record, file_count: int = 0) -> DataConnectorInfo:
@@ -238,6 +262,9 @@ async def create_data_source(
         cred_path = cred_dir / "credentials.json"
         cred_path.write_bytes(raw)
         parse_credentials(str(cred_path))
+
+        # Sync credentials into Pathway container (WSL→Docker Desktop cross-fs)
+        _sync_credentials_to_container(record.id, cred_path)
 
         record.credentials_path = str(cred_path)
         db.commit()

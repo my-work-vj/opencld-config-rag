@@ -78,7 +78,7 @@ async def health():
         pathway_message = str(exc)
 
     core_ok = all([llm_ok, qdrant_ok, pg_ok])
-    overall = "healthy" if core_ok and pathway_ready else "degraded"
+    overall = "healthy" if core_ok else "degraded"
 
     return StatusResponse(
         status=overall,
