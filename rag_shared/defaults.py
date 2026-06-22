@@ -17,7 +17,7 @@ DEFAULT_LLM_PARAMS: dict[str, Any] = {
 }
 
 DEFAULT_INGESTION_STAGES: dict[str, dict[str, Any]] = {
-    "ingestion": {"strategy": "pdf_ingestion", "config": {}},
+    "ingestion": {"strategy": "kreuzberg_ingestion", "config": {}},
     "chunking": {
         "strategy": "recursive_chunking",
         "config": {"chunk_size": 512, "chunk_overlap": 50},

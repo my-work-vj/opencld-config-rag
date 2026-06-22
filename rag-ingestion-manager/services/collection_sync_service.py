@@ -69,23 +69,18 @@ def _run_connector_file_ingest(
         finally:
             shared_db.close()
 
-        if source_type == "pdf":
-            config["pipeline"]["stages"]["ingestion"] = {
-                "strategy": "pdf_ingestion",
-                "config": {},
-            }
-        elif source_type == "web":
-            config["pipeline"]["stages"]["ingestion"] = {
-                "strategy": "web_ingestion",
-                "config": {},
-            }
+        # Use kreuzberg_ingestion as the unified ingestion strategy for all document types.
+        # Kreuzberg handles 96 formats (PDF, Office, images, HTML, text, etc.) — plain text only.
+        config["pipeline"]["stages"]["ingestion"] = {
+            "strategy": "kreuzberg_ingestion",
+            "config": {},
+        }
 
         pipeline = IngestionPipeline(config)
-        ingestion_overrides: dict = {}
-        if source_type == "pdf":
-            ingestion_overrides = {"strategy": "pdf_ingestion", "config": {}}
-        elif source_type == "web":
-            ingestion_overrides = {"strategy": "web_ingestion", "config": {}}
+        ingestion_overrides: dict = {
+            "strategy": "kreuzberg_ingestion",
+            "config": {},
+        }
 
         documents = pipeline.run_ingestion(source_path, **ingestion_overrides)
         for doc in documents:

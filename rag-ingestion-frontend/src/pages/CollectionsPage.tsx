@@ -4,17 +4,14 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Database, Plus } from 'lucide-react'
 import { api, ApiError } from '@/lib/api'
 import { Card, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card'
-import { Label, Input, Textarea } from '@/components/ui/Field'
+import { Label, Input, Textarea, Select } from '@/components/ui/Field'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { EmptyState, Spinner } from '@/components/ui/Feedback'
-import { RagStagesEditor, resolveStageMaps } from '@/components/RagStagesEditor'
+import RagStagesEditor, { resolveStageMaps, type IngestionMode } from '@/components/RagStagesEditor'
 import {
-  DEFAULT_CHAT_MODEL,
   DEFAULT_EMBEDDING_MODEL,
   DEFAULT_INGESTION_STAGES,
-  DEFAULT_QUERY_STAGES,
-  DEFAULT_RERANKER_MODEL,
 } from '@/lib/stage-defaults'
 import type { KnowledgeSource } from '@/types/api'
 
@@ -24,12 +21,10 @@ export function CollectionsPage() {
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [embeddingModel, setEmbeddingModel] = useState(DEFAULT_EMBEDDING_MODEL)
-  const [chatModel, setChatModel] = useState(DEFAULT_CHAT_MODEL)
-  const [rerankerModel, setRerankerModel] = useState(DEFAULT_RERANKER_MODEL)
-  const [vectorSize, setVectorSize] = useState(2048)
   const [selectedDataConnectorIds, setSelectedDataConnectorIds] = useState<string[]>([])
   const [stageStrategies, setStageStrategies] = useState<Record<string, string>>({})
   const [stageConfigs, setStageConfigs] = useState<Record<string, string>>({})
+  const [ingestionMode, setIngestionMode] = useState<IngestionMode>('document_plain')
   const [error, setError] = useState<string | null>(null)
 
   const collections = useQuery({
@@ -37,26 +32,26 @@ export function CollectionsPage() {
     queryFn: async () => (await api.vectorCollections()).collections,
   })
 
-  const strategies = useQuery({
-    queryKey: ['strategies'],
-    queryFn: api.strategies,
-  })
-
   const dataSources = useQuery({
     queryKey: ['data-sources'],
     queryFn: async () => (await api.dataSources()).data_sources,
+  })
+
+  const llmModels = useQuery({
+    queryKey: ['llm-models'],
+    queryFn: api.llmModels,
+    refetchInterval: 60_000,
   })
 
   const resolvedStages = useMemo(
     () =>
       resolveStageMaps(
         DEFAULT_INGESTION_STAGES,
-        DEFAULT_QUERY_STAGES,
         stageStrategies,
         stageConfigs,
-        { embeddingModel, vectorSize, chatModel, rerankerModel },
+        { embeddingModel },
       ),
-    [stageStrategies, stageConfigs, embeddingModel, vectorSize, chatModel, rerankerModel],
+    [stageStrategies, stageConfigs, embeddingModel],
   )
 
   const createMutation = useMutation({
@@ -69,6 +64,7 @@ export function CollectionsPage() {
       setSelectedDataConnectorIds([])
       setStageStrategies({})
       setStageConfigs({})
+      setIngestionMode('document_plain')
       setError(null)
     },
     onError: (err) => {
@@ -98,15 +94,9 @@ export function CollectionsPage() {
       name: name.trim(),
       description,
       embedding_model: embeddingModel,
-      vector_size: vectorSize,
-      chat_model: chatModel,
-      reranker_model: rerankerModel,
       data_connector_ids: selectedDataConnectorIds,
       stages: Object.fromEntries(
         Object.entries(resolvedStages.ingestion).map(([s, cfg]) => [s, cfg]),
-      ),
-      query_stages: Object.fromEntries(
-        Object.entries(resolvedStages.query).map(([s, cfg]) => [s, cfg]),
       ),
     })
   }
@@ -127,7 +117,7 @@ export function CollectionsPage() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-white">Collections</h1>
           <p className="mt-1 max-w-2xl text-sm text-slate-400">
-            Configure ingestion and query stages, link data sources, and build a monitored Qdrant
+            Configure ingestion stages, link data sources, and build a monitored Qdrant
             collection end to end.
           </p>
         </div>
@@ -142,7 +132,9 @@ export function CollectionsPage() {
           <CardHeader>
             <CardTitle>Create vector collection</CardTitle>
             <CardDescription>
-              Select strategies for every stage from ingestion through querying.
+              Link one or more data sources and choose your embedding model and document source
+              type. The ingestion pipeline handles chunking, embedding, and indexing automatically
+              via LiteLLM.
             </CardDescription>
           </CardHeader>
           <form onSubmit={handleCreate} className="space-y-6">
@@ -195,56 +187,20 @@ export function CollectionsPage() {
                 rows={2}
               />
             </div>
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              <div className="space-y-2">
-                <Label htmlFor="col-embed">Embedding model</Label>
-                <Input
-                  id="col-embed"
-                  value={embeddingModel}
-                  onChange={(e) => setEmbeddingModel(e.target.value)}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="col-chat">Chat model</Label>
-                <Input
-                  id="col-chat"
-                  value={chatModel}
-                  onChange={(e) => setChatModel(e.target.value)}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="col-rerank">Reranker model</Label>
-                <Input
-                  id="col-rerank"
-                  value={rerankerModel}
-                  onChange={(e) => setRerankerModel(e.target.value)}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="col-dim">Vector size</Label>
-                <Input
-                  id="col-dim"
-                  type="number"
-                  min={128}
-                  max={8192}
-                  value={vectorSize}
-                  onChange={(e) => setVectorSize(Number(e.target.value))}
-                />
-              </div>
-            </div>
+
             <RagStagesEditor
-              strategies={strategies.data ?? {}}
-              ingestionStages={resolvedStages.ingestion}
-              queryStages={resolvedStages.query}
-              stageOverrides={stageStrategies}
-              configOverrides={stageConfigs}
-              onStrategyChange={(stage, strategy) =>
-                setStageStrategies((s) => ({ ...s, [stage]: strategy }))
-              }
-              onConfigChange={(stage, configJson) =>
-                setStageConfigs((c) => ({ ...c, [stage]: configJson }))
-              }
+              baseStages={DEFAULT_INGESTION_STAGES}
+              stageStrategies={stageStrategies}
+              stageConfigs={stageConfigs}
+              onChangeStrategies={setStageStrategies}
+              onChangeConfigs={setStageConfigs}
+              embeddingModel={embeddingModel}
+              onChangeEmbeddingModel={setEmbeddingModel}
+              llmModels={llmModels.data}
+              ingestionMode={ingestionMode}
+              onChangeIngestionMode={setIngestionMode}
             />
+
             {error && <p className="text-sm text-red-400" role="alert">{error}</p>}
             <Button type="submit" isLoading={createMutation.isPending}>
               Create collection
@@ -256,7 +212,7 @@ export function CollectionsPage() {
       {list.length === 0 ? (
         <EmptyState
           title="No collections"
-          description="Create a collection with full ingestion and query stage configuration."
+          description="Create a collection with full ingestion stage configuration."
           action={<Button onClick={() => setShowForm(true)}>Create collection</Button>}
         />
       ) : (

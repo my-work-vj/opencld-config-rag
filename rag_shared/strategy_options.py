@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 STAGE_STRATEGY_OPTIONS: dict[str, list[str]] = {
-    "ingestion": ["text_ingestion", "pdf_ingestion", "web_ingestion"],
+    "ingestion": ["kreuzberg_ingestion", "text_ingestion", "pdf_ingestion", "web_ingestion"],
     "chunking": ["recursive_chunking", "fixed_size_chunking"],
     "embedding": ["litellm_embedding"],
     "indexing": ["qdrant_indexing"],

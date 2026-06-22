@@ -1,4 +1,4 @@
-"""Ingestion strategies — from files, web, raw text."""
+"""Ingestion strategies — from files, web, raw text, and unified kreuzberg extraction."""
 
 import os
 import uuid
@@ -9,6 +9,9 @@ from core.base_strategies import BaseIngestionStrategy, Document
 from core.registry import StrategyRegistry
 
 logger = logging.getLogger(__name__)
+
+# Auto-import our kreuzberg strategy so it's registered
+from . import kreuzberg_ingestion  # noqa: F401
 
 
 @StrategyRegistry.register("ingestion", "text_ingestion")

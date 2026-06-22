@@ -5,17 +5,14 @@ import { ArrowLeft, Cloud, Database, Settings2, Trash2, Upload } from 'lucide-re
 import { api, ApiError } from '@/lib/api'
 import { AUTO_SYNC_POLL_MS, syncPollInterval } from '@/lib/poll'
 import { Card, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card'
-import { Label, Select, Input } from '@/components/ui/Field'
+import { Label, Select } from '@/components/ui/Field'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { Spinner } from '@/components/ui/Feedback'
-import { RagStagesEditor, resolveStageMaps } from '@/components/RagStagesEditor'
+import RagStagesEditor, { resolveStageMaps, type IngestionMode } from '@/components/RagStagesEditor'
 import {
-  DEFAULT_CHAT_MODEL,
   DEFAULT_EMBEDDING_MODEL,
   DEFAULT_INGESTION_STAGES,
-  DEFAULT_QUERY_STAGES,
-  DEFAULT_RERANKER_MODEL,
 } from '@/lib/stage-defaults'
 import { stringifyStageConfig } from '@/components/StageConfigEditor'
 
@@ -32,22 +29,22 @@ export function CollectionDetailPage() {
   const [editingStages, setEditingStages] = useState(false)
   const [stageSaveMessage, setStageSaveMessage] = useState<string | null>(null)
   const [embeddingModel, setEmbeddingModel] = useState(DEFAULT_EMBEDDING_MODEL)
-  const [chatModel, setChatModel] = useState(DEFAULT_CHAT_MODEL)
-  const [rerankerModel, setRerankerModel] = useState(DEFAULT_RERANKER_MODEL)
-  const [vectorSize, setVectorSize] = useState(2048)
   const [stageStrategies, setStageStrategies] = useState<Record<string, string>>({})
   const [stageConfigs, setStageConfigs] = useState<Record<string, string>>({})
+  const [ingestionMode, setIngestionMode] = useState<IngestionMode>('document_plain')
 
-  const strategies = useQuery({
-    queryKey: ['strategies'],
-    queryFn: api.strategies,
+  const llmModels = useQuery({
+    queryKey: ['llm-models'],
+    queryFn: api.llmModels,
+    refetchInterval: 60_000,
   })
 
   const collection = useQuery({
     queryKey: ['vector-collection', decodedName],
     queryFn: () => api.vectorCollection(decodedName),
     enabled: Boolean(decodedName),
-    refetchInterval: (q) => syncPollInterval(q.state.data?.status),
+    refetchInterval: (q: { state: { data: { status: string } | undefined } }) =>
+      syncPollInterval(q.state.data?.status),
   })
 
   const documents = useQuery({
@@ -130,19 +127,14 @@ export function CollectionDetailPage() {
 
   const c = collection.data
   const ingestionStages = c?.ingestion_stages ?? DEFAULT_INGESTION_STAGES
-  const queryStages = c?.query_stages ?? DEFAULT_QUERY_STAGES
 
   useEffect(() => {
     if (!c) return
     setEmbeddingModel(c.embedding_model || DEFAULT_EMBEDDING_MODEL)
-    setChatModel(c.chat_model || DEFAULT_CHAT_MODEL)
-    setRerankerModel(c.reranker_model || DEFAULT_RERANKER_MODEL)
-    setVectorSize(c.vector_size || 2048)
     const strategiesMap: Record<string, string> = {}
     const configsMap: Record<string, string> = {}
     const allStages = {
       ...(c.ingestion_stages ?? DEFAULT_INGESTION_STAGES),
-      ...(c.query_stages ?? DEFAULT_QUERY_STAGES),
     }
     for (const [stage, cfg] of Object.entries(allStages)) {
       if (cfg?.strategy) strategiesMap[stage] = cfg.strategy
@@ -150,26 +142,21 @@ export function CollectionDetailPage() {
     }
     setStageStrategies(strategiesMap)
     setStageConfigs(configsMap)
-  }, [c?.name, c?.embedding_model, c?.chat_model, c?.reranker_model, c?.vector_size])
+  }, [c?.name, c?.embedding_model])
 
   const resolvedStages = useMemo(
     () =>
       resolveStageMaps(
         ingestionStages,
-        queryStages,
         stageStrategies,
         stageConfigs,
-        { embeddingModel, vectorSize, chatModel, rerankerModel },
+        { embeddingModel },
       ),
     [
       ingestionStages,
-      queryStages,
       stageStrategies,
       stageConfigs,
       embeddingModel,
-      vectorSize,
-      chatModel,
-      rerankerModel,
     ],
   )
 
@@ -210,14 +197,8 @@ export function CollectionDetailPage() {
   const handleSaveStages = () => {
     updateStagesMutation.mutate({
       embedding_model: embeddingModel,
-      vector_size: vectorSize,
-      chat_model: chatModel,
-      reranker_model: rerankerModel,
       stages: Object.fromEntries(
         Object.entries(resolvedStages.ingestion).map(([s, cfg]) => [s, cfg]),
-      ),
-      query_stages: Object.fromEntries(
-        Object.entries(resolvedStages.query).map(([s, cfg]) => [s, cfg]),
       ),
     })
   }
@@ -265,11 +246,10 @@ export function CollectionDetailPage() {
 
       <p className="text-sm text-slate-400">{c.description}</p>
 
-      <div className="grid gap-3 sm:grid-cols-4 text-sm">
+      <div className="grid gap-3 sm:grid-cols-3 text-sm">
         <Stat label="Embedding" value={c.embedding_model || '—'} />
-        <Stat label="Chat model" value={c.chat_model || '—'} />
-        <Stat label="Vector dim" value={String(c.vector_size)} />
         <Stat label="Documents" value={String(c.document_count)} />
+        <Stat label="Chunks" value={String(c.chunk_count)} />
       </div>
 
       <Card elevated>
@@ -278,10 +258,11 @@ export function CollectionDetailPage() {
             <div>
               <CardTitle className="flex items-center gap-2">
                 <Settings2 className="size-5 text-indigo-400" aria-hidden="true" />
-                RAG stage configuration
+                Ingestion stage configuration
               </CardTitle>
               <CardDescription>
-                Ingestion and query strategies for this collection.
+                Configure the document source type and chunking strategy. Embedding is handled
+                automatically via LiteLLM.
               </CardDescription>
             </div>
             <Button
@@ -295,53 +276,17 @@ export function CollectionDetailPage() {
         </CardHeader>
         {editingStages ? (
           <div className="space-y-6">
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              <div className="space-y-2">
-                <Label htmlFor="edit-embed">Embedding model</Label>
-                <Input
-                  id="edit-embed"
-                  value={embeddingModel}
-                  onChange={(e) => setEmbeddingModel(e.target.value)}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="edit-chat">Chat model</Label>
-                <Input
-                  id="edit-chat"
-                  value={chatModel}
-                  onChange={(e) => setChatModel(e.target.value)}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="edit-rerank">Reranker model</Label>
-                <Input
-                  id="edit-rerank"
-                  value={rerankerModel}
-                  onChange={(e) => setRerankerModel(e.target.value)}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="edit-dim">Vector size</Label>
-                <Input
-                  id="edit-dim"
-                  type="number"
-                  value={vectorSize}
-                  onChange={(e) => setVectorSize(Number(e.target.value))}
-                />
-              </div>
-            </div>
             <RagStagesEditor
-              strategies={strategies.data ?? {}}
-              ingestionStages={resolvedStages.ingestion}
-              queryStages={resolvedStages.query}
-              stageOverrides={stageStrategies}
-              configOverrides={stageConfigs}
-              onStrategyChange={(stage, strategy) =>
-                setStageStrategies((s) => ({ ...s, [stage]: strategy }))
-              }
-              onConfigChange={(stage, configJson) =>
-                setStageConfigs((c) => ({ ...c, [stage]: configJson }))
-              }
+              baseStages={ingestionStages}
+              stageStrategies={stageStrategies}
+              stageConfigs={stageConfigs}
+              onChangeStrategies={setStageStrategies}
+              onChangeConfigs={setStageConfigs}
+              embeddingModel={embeddingModel}
+              onChangeEmbeddingModel={setEmbeddingModel}
+              llmModels={llmModels.data}
+              ingestionMode={ingestionMode}
+              onChangeIngestionMode={setIngestionMode}
             />
             <Button onClick={handleSaveStages} isLoading={updateStagesMutation.isPending}>
               Save configuration
@@ -355,13 +300,6 @@ export function CollectionDetailPage() {
             <div className="flex flex-wrap gap-2">
               {Object.entries(ingestionStages).map(([stage, cfg]) => (
                 <Badge key={`ing-${stage}`} variant="outline">
-                  {stage}: {cfg.strategy}
-                </Badge>
-              ))}
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {Object.entries(queryStages).map(([stage, cfg]) => (
-                <Badge key={`q-${stage}`} variant="outline">
                   {stage}: {cfg.strategy}
                 </Badge>
               ))}
@@ -537,7 +475,7 @@ function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-lg bg-slate-800/50 px-3 py-2">
       <p className="text-xs text-slate-500">{label}</p>
-      <p className="font-mono text-sm font-medium text-slate-200 truncate">{value}</p>
+      <p className="text-sm font-medium text-slate-200">{value}</p>
     </div>
   )
 }
