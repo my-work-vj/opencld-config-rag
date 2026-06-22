@@ -13,5 +13,6 @@ build/
 plan.md
 data/connectors/
 **/credentials.json
+eval_reports/
 check_*.py
 test_*.py

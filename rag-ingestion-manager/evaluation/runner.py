@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 import time
-from typing import Dict, Any, List, Tuple, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from core.base_strategies import Document, Chunk, EmbeddingVector
 from . import extraction_metrics, chunking_metrics, embedding_metrics, pipeline_health
@@ -22,6 +22,8 @@ def run_evaluation(
     db_chunk_count: int,
     qdrant_client: Optional[Any] = None,
     chunking_config: Optional[Dict[str, Any]] = None,
+    test_questions: Optional[List[Dict[str, str]]] = None,
+    retrieval_kwargs: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Run all evaluation layers and return a dict of results.
@@ -40,6 +42,8 @@ def run_evaluation(
         db_chunk_count: Total chunks in DB for the collection after sync.
         qdrant_client: Optional QdrantClient instance for cross-validation.
         chunking_config: Optional chunking config dict (chunk_size, overlap, etc.).
+        test_questions: Optional list of dicts with "question" and "ground_truth" keys for Layer 5.
+        retrieval_kwargs: Optional kwargs for retrieval evaluation.
 
     Returns:
         {
@@ -50,6 +54,7 @@ def run_evaluation(
                 "chunking": {...},
                 "embedding": {...},
                 "pipeline": {...},
+                "retrieval": {...} | None,
             }
         }
     """
@@ -84,6 +89,25 @@ def run_evaluation(
             db_chunk_count=db_chunk_count,
         )
 
+    # Layer 5: Retrieval evaluation (if test questions provided)
+    retrieval_result = None
+    if test_questions and len(test_questions) > 0:
+        try:
+            from .retrieval_eval import evaluate_retrieval
+            rk = retrieval_kwargs or {}
+            retrieval_result = evaluate_retrieval(
+                collection_name=collection_name,
+                test_questions=test_questions,
+                llm_client=rk.get("llm_client"),
+                qdrant_client=qdrant_client,
+                embed_model=rk.get("embed_model", "nvidia-embed"),
+                chat_model=rk.get("chat_model", "llama-3.3-70b-versatile"),
+                judge_model=rk.get("judge_model", "llama-3.3-70b-versatile"),
+                top_k=rk.get("top_k", 5),
+            )
+        except Exception as exc:
+            print(f"  Layer 5 (retrieval) failed: {exc}")
+
     return {
         "collection_name": collection_name,
         "timestamp": time.time(),
@@ -92,5 +116,6 @@ def run_evaluation(
             "chunking": chunking_result,
             "embedding": embedding_result,
             "pipeline": pipeline_result,
+            "retrieval": retrieval_result,
         },
     }
