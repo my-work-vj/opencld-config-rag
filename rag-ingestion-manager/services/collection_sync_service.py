@@ -22,6 +22,8 @@ from rag_shared.connector_repo import DataConnectorRepo
 from rag_shared.db import SessionLocal as SharedSession
 from rag_shared.indexed_document_repo import IndexedDocumentRepo
 from rag_shared.knowledge_repo import KnowledgeSourceRepo
+from qdrant_client import QdrantClient
+from evaluation.runner import run_evaluation
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +80,7 @@ def _run_connector_file_ingest(
     errors: List[Tuple[str, str]] = []
     stage_timings: Dict[str, float] = {}
     file_size_bytes = os.path.getsize(source_path) if os.path.exists(source_path) else 0
+    overall_start = time.time()
 
     try:
         shared_db = SharedSession()
@@ -186,6 +189,44 @@ def _run_connector_file_ingest(
     except Exception as exc:
         logger.warning("Could not save document metadata: %s", exc)
 
+    # Run evaluation on this file's ingestion
+    eval_result = None
+    if not errors and documents:
+        sync_duration = time.time() - overall_start
+        try:
+            qclient = QdrantClient(
+                host=os.getenv("QDRANT_HOST", "localhost"),
+                port=int(os.getenv("QDRANT_PORT", "6333")),
+            )
+        except Exception:
+            qclient = None
+        try:
+            db_repo = SharedSession()
+            try:
+                d_cnt = IndexedDocumentRepo.count_for_collection(db_repo, knowledge_source_name)
+                c_cnt = IndexedDocumentRepo.sum_chunks(db_repo, knowledge_source_name)
+            finally:
+                db_repo.close()
+        except Exception:
+            d_cnt, c_cnt = len(documents), len(chunks)
+        try:
+            eval_result = run_evaluation(
+                collection_name=knowledge_source_name,
+                documents=documents,
+                chunks=chunks,
+                embeddings=embeddings,
+                errors=errors,
+                file_sizes_bytes=[file_size_bytes] * len(documents) if documents else [],
+                stage_timings=stage_timings,
+                sync_result={"added": len(documents), "updated": 0, "deleted": 0, "errors": errors},
+                sync_duration=sync_duration,
+                db_doc_count=d_cnt,
+                db_chunk_count=c_cnt,
+                qdrant_client=qclient,
+            )
+        except Exception as eval_exc:
+            logger.warning("Evaluation failed for %s: %s", source_path, eval_exc)
+
     # Return the original keys plus evaluation data
     result = {
         "document_count": doc_count,
@@ -201,6 +242,7 @@ def _run_connector_file_ingest(
             "file_size_bytes": file_size_bytes,
             "stage_timings": stage_timings,
         },
+        "eval_result": eval_result,
     }
     return result
 def _recalculate_collection_counts(db, knowledge_source_name: str) -> None:
