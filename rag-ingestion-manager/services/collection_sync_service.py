@@ -1,10 +1,12 @@
 """Incremental sync: mirror connector file CRUD into vector collections."""
-
 from __future__ import annotations
 
 import hashlib
 import logging
+import os
+import time
 from pathlib import Path
+from typing import Any, Dict, List, Tuple
 
 from connectors.pathway.container import container_to_host_path
 from connectors.google_drive import source_type_for_path
@@ -51,6 +53,13 @@ def _run_connector_file_ingest(
     source_type: str,
     connector_metadata: dict,
 ) -> dict:
+    """
+    Ingest a single file and return metrics for evaluation.
+
+    Returns a dict with:
+        - document_count, chunk_count, document_id (as before)
+        - plus evaluation data: documents, chunks, embeddings, errors, file_size_bytes, stage_timings
+    """
     _ensure_pipeline_strategies()
     db = SharedSession()
     try:
@@ -61,6 +70,14 @@ def _run_connector_file_ingest(
         embedding_model = ks.embedding_model or ""
     finally:
         db.close()
+
+    # Initialize evaluation data containers
+    documents: List[Any] = []
+    chunks: List[Any] = []
+    embeddings: List[Any] = []
+    errors: List[Tuple[str, str]] = []
+    stage_timings: Dict[str, float] = {}
+    file_size_bytes = os.path.getsize(source_path) if os.path.exists(source_path) else 0
 
     try:
         shared_db = SharedSession()
@@ -82,22 +99,59 @@ def _run_connector_file_ingest(
             "config": {},
         }
 
-        documents = pipeline.run_ingestion(source_path, **ingestion_overrides)
-        for doc in documents:
-            doc.metadata.update(connector_metadata)
-            if connector_metadata.get("filename"):
-                doc.filename = connector_metadata["filename"]
+        # Ingestion stage
+        try:
+            t0 = time.time()
+            documents = pipeline.run_ingestion(source_path, **ingestion_overrides)
+            stage_timings["ingestion"] = time.time() - t0
+        except Exception as e:
+            errors.append((source_path, f"Ingestion failed: {e}"))
+            documents = []
 
-        chunks = pipeline.run_chunking(documents)
-        embeddings = pipeline.run_embedding(chunks)
-        pipeline.run_indexing(
-            embeddings,
-            config={
-                "collection_name": collection_name,
-                "vector_size": vector_size,
-                "model": embedding_model,
-            },
-        )
+        # Only proceed if ingestion succeeded
+        if not errors:
+            for doc in documents:
+                doc.metadata.update(connector_metadata)
+                if connector_metadata.get("filename"):
+                    doc.filename = connector_metadata["filename"]
+
+            # Chunking stage
+            try:
+                t0 = time.time()
+                chunks = pipeline.run_chunking(documents)
+                stage_timings["chunking"] = time.time() - t0
+            except Exception as e:
+                errors.append((source_path, f"Chunking failed: {e}"))
+                chunks = []
+
+        # Only proceed if chunking succeeded
+        if not errors:
+            # Embedding stage
+            try:
+                t0 = time.time()
+                embeddings = pipeline.run_embedding(chunks)
+                stage_timings["embedding"] = time.time() - t0
+            except Exception as e:
+                errors.append((source_path, f"Embedding failed: {e}"))
+                embeddings = []
+
+        # Only proceed if embedding succeeded
+        if not errors:
+            # Indexing stage
+            try:
+                t0 = time.time()
+                pipeline.run_indexing(
+                    embeddings,
+                    config={
+                        "collection_name": collection_name,
+                        "vector_size": vector_size,
+                        "model": embedding_model,
+                    },
+                )
+                stage_timings["indexing"] = time.time() - t0
+            except Exception as e:
+                errors.append((source_path, f"Indexing failed: {e}"))
+
     except Exception as exc:
         db = SharedSession()
         try:
@@ -132,14 +186,23 @@ def _run_connector_file_ingest(
     except Exception as exc:
         logger.warning("Could not save document metadata: %s", exc)
 
-    return {
+    # Return the original keys plus evaluation data
+    result = {
         "document_count": doc_count,
         "chunk_count": chunk_count,
         "document_id": document_id,
         "collection_name": collection_name,
+        # Evaluation data
+        "evaluation": {
+            "documents": documents,
+            "chunks": chunks,
+            "embeddings": embeddings,
+            "errors": errors,
+            "file_size_bytes": file_size_bytes,
+            "stage_timings": stage_timings,
+        },
     }
-
-
+    return result
 def _recalculate_collection_counts(db, knowledge_source_name: str) -> None:
     doc_count = IndexedDocumentRepo.count_for_collection(db, knowledge_source_name)
     chunk_count = IndexedDocumentRepo.sum_chunks(db, knowledge_source_name)
