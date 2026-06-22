@@ -1,0 +1,36 @@
+# Evaluation thresholds per metric layer
+# Each threshold defines a pass/fail boundary.
+# - min: minimum acceptable value (metrics where higher is better)
+# - max: maximum acceptable value (metrics where lower is better)
+# - enabled: set false to skip this check
+
+extraction:
+  success_rate: { min: 0.95, enabled: true }
+  empty_extraction_rate: { max: 0.10, enabled: true }
+  error_rate: { max: 0.10, enabled: true }
+  avg_content_length: { min: 50, enabled: false }
+  format_coverage: { min: 1, enabled: false }
+
+chunking:
+  total_chunks: { min: 1, enabled: true }
+  avg_chunk_size: { min: 50, max: 5000, enabled: true }
+  empty_chunks: { max: 0, enabled: true }
+  duplicate_content_rate: { max: 0.05, enabled: true }
+
+embedding:
+  total_embeddings: { min: 1, enabled: true }
+  zero_vector_rate: { max: 0.10, enabled: true }
+  dimension_utilization: { min: 0.3, enabled: true }
+
+pipeline:
+  total_documents: { min: 1, enabled: false }
+  total_chunks: { min: 1, enabled: false }
+  error_rate: { max: 0.20, enabled: true }
+  docs_per_second: { min: 0.1, enabled: false }
+
+retrieval:
+  faithfulness: { min: 0.5, enabled: true }
+  answer_relevancy: { min: 0.5, enabled: true }
+  context_precision: { min: 0.4, enabled: true }
+  context_recall: { min: 0.4, enabled: true }
+  noise_sensitivity: { min: 0.3, enabled: true }

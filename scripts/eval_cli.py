@@ -114,6 +114,7 @@ def evaluate_collection(
     output: str = "markdown",
     run_retrieval: bool = False,
     compare: bool = False,
+    check_thresholds: bool = False,
 ):
     """
     Evaluate a collection by triggering a sync and running metrics.
@@ -121,6 +122,7 @@ def evaluate_collection(
     import time
     from services.collection_sync_service import sync_collection
     from evaluation.reporter import store_result, format_summary, compare_baseline
+    from evaluation.thresholds import check_thresholds as _check_thresholds, format_threshold_report
 
     print(f"🚀 Evaluating collection: {collection_name}")
     t0 = time.time()
@@ -211,6 +213,22 @@ def evaluate_collection(
         else:
             print("  No regressions detected.")
 
+    # Check thresholds
+    if check_thresholds:
+        eval_layers = {
+            "collection_name": collection_name,
+            "timestamp": t0,
+            "layers": {
+                "extraction": result.get("evaluation", {}).get("layers", {}).get("extraction", {}),
+                "chunking": result.get("evaluation", {}).get("layers", {}).get("chunking", {}),
+                "embedding": result.get("evaluation", {}).get("layers", {}).get("embedding", {}),
+                "pipeline": result,
+                "retrieval": result.get("retrieval_result"),
+            },
+        }
+        t_result = _check_thresholds(eval_layers)
+        print(f"\n  {format_threshold_report(t_result)}")
+
     print(f"\n  Report saved: {report_path}")
 
 
@@ -224,6 +242,7 @@ def main():
   python scripts/eval_cli.py --collection my-resume-vecstore --add-question "What's in it?" "My resume data"
   python scripts/eval_cli.py --collection my-resume-vecstore --generate-synthetic 5
   python scripts/eval_cli.py --collection my-resume-vecstore --compare
+  python scripts/eval_cli.py --collection my-resume-vecstore --check-thresholds
   python scripts/eval_cli.py --list-collections""",
     )
     parser.add_argument("--collection", type=str, help="Collection name to evaluate")
@@ -238,6 +257,7 @@ def main():
     # Evaluation options
     parser.add_argument("--run-retrieval", action="store_true", help="Run Layer 5 retrieval evaluation (requires test questions)")
     parser.add_argument("--compare", action="store_true", help="Compare against baseline")
+    parser.add_argument("--check-thresholds", action="store_true", help="Check metrics against thresholds")
 
     args = parser.parse_args()
 
@@ -273,6 +293,7 @@ def main():
         output=args.output,
         run_retrieval=args.run_retrieval,
         compare=args.compare,
+        check_thresholds=args.check_thresholds,
     )
 
 

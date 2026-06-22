@@ -31,6 +31,7 @@ from api.routes.collections import router as collections_router
 from api.routes.data_connectors import router as data_connectors_router
 from api.routes.knowledge_bases import router as knowledge_bases_router
 from api.routes.knowledge_sources import router as knowledge_sources_router
+from api.routes.evaluation import router as evaluation_router
 
 logging.basicConfig(
     level=logging.INFO,
@@ -101,6 +102,7 @@ app.include_router(knowledge_sources_router, prefix="/api/v1")
 app.include_router(collections_router, prefix="/api/v1")
 app.include_router(knowledge_bases_router, prefix="/api/v1")
 app.include_router(data_connectors_router, prefix="/api/v1")
+app.include_router(evaluation_router, prefix="/api/v1")
 
 
 if __name__ == "__main__":
