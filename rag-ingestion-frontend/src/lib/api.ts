@@ -12,10 +12,10 @@ import type {
   DataConnectorSyncResponse,
   DataConnectorTestResponse,
   DataConnectorUploadResponse,
-  IndexedDocumentListResponse,
+  EvalResult,
+  EvaluationListResponse,
   HealthResponse,
-  LlmModels,
-  PathwayDockerHealth,
+  IndexedDocumentListResponse,
   IngestRequest,
   IngestResponse,
   KnowledgeBase,
@@ -23,11 +23,13 @@ import type {
   KnowledgeSource,
   KnowledgeSourceIngestRequest,
   KnowledgeSourceIngestResponse,
+  LlmModels,
+  PathwayDockerHealth,
   QdrantCollectionInfo,
   StrategiesMap,
+  ThresholdReport,
   UpdateCollectionRequest,
 } from '@/types/api'
-
 
 
 class ApiError extends Error {
@@ -375,10 +377,36 @@ export const api = {
 
     ),
 
+  // ── Evaluation ──
+
+  evaluateCollection: (name: string) =>
+    request<EvalResult>(
+      `/collections/${encodeURIComponent(name)}/evaluate`,
+      { method: 'POST' },
+    ),
+
+  evaluateRecent: (name: string) =>
+    request<EvalResult>(
+      `/collections/${encodeURIComponent(name)}/evaluate`,
+      { method: 'POST', body: JSON.stringify({ retrieve_latest_run: true }) },
+    ),
+
+  evaluationReports: (name: string) =>
+    request<EvaluationListResponse>(
+      `/collections/${encodeURIComponent(name)}/evaluations`,
+    ),
+
+  latestEvaluation: (name: string) =>
+    request<EvalResult>(
+      `/collections/${encodeURIComponent(name)}/evaluations/latest`,
+    ),
+
+  evaluationThresholds: (name: string) =>
+    request<ThresholdReport>(
+      `/collections/${encodeURIComponent(name)}/evaluations/latest/thresholds`,
+    ),
 }
 
 
 
 export { ApiError }
-
-

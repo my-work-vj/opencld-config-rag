@@ -51,22 +51,34 @@ async def evaluate_collection(
     """
     Run evaluation on a collection (Layers 1-4, optionally Layer 5 retrieval).
 
-    Triggers a sync-evaluation cycle and stores the report.
+    First syncs to ensure data is current, then evaluates the stored data
+    from Qdrant and the DB.
     """
     if not _collection_exists(name):
         raise HTTPException(status_code=404, detail=f"Collection '{name}' not found")
 
     import time
     from services.collection_sync_service import sync_collection
+    from services.evaluation_service import evaluate_collection_from_storage
 
     t0 = time.time()
-    try:
-        result = sync_collection(name)
-        duration = time.time() - t0
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Sync failed: {exc}")
 
-    # Run retrieval evaluation if requested
+    # Step 1: Sync to make sure data is current
+    try:
+        sync_collection(name)
+    except Exception as exc:
+        logger.warning("Sync before evaluation failed for '%s': %s", name, exc)
+        # Continue anyway — we can evaluate whatever is in Qdrant
+
+    # Step 2: Evaluate stored data from Qdrant + DB
+    try:
+        eval_result = evaluate_collection_from_storage(name)
+        duration = time.time() - t0
+        eval_result["sync_duration_sec"] = round(duration, 3)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Evaluation failed: {exc}")
+
+    # Step 3: Run retrieval evaluation if requested
     retrieval_result = None
     if run_retrieval:
         try:
@@ -78,7 +90,7 @@ async def evaluate_collection(
             questions = ts.get_questions()
             if questions:
                 qclient = QdrantClient(
-                    host=os.getenv("QDRANT_HOST", "localhost"),
+                    host=os.getenv("QDRANT_HOST", "host.docker.internal"),
                     port=int(os.getenv("QDRANT_PORT", "6333")),
                 )
                 retrieval_result = evaluate_retrieval(
@@ -86,38 +98,20 @@ async def evaluate_collection(
                     test_questions=[{"question": q.question, "ground_truth": q.ground_truth} for q in questions],
                     qdrant_client=qclient,
                 )
+                if retrieval_result:
+                    eval_result.setdefault("layers", {})["retrieval"] = retrieval_result
         except Exception as exc:
             logger.warning("Retrieval eval failed for '%s': %s", name, exc)
 
-    # Build the full evaluation result
-    eval_result = {
-        "collection_name": name,
-        "timestamp": t0,
-        "layers": {
-            "extraction": result.get("evaluation", {}).get("layers", {}).get("extraction", {}),
-            "chunking": result.get("evaluation", {}).get("layers", {}).get("chunking", {}),
-            "embedding": result.get("evaluation", {}).get("layers", {}).get("embedding", {}),
-            "pipeline": result,
-            "retrieval": retrieval_result,
-        },
-    }
-
-    # Check thresholds
-    threshold_result = check_thresholds(eval_result)
-
-    # Store report
-    report_path = _store_report(eval_result)
+    # Step 4: Return result (the report was already stored in evaluate...from_storage)
+    report_path = eval_result.get("report_path", "")
 
     return {
         "collection": name,
-        "status": result.get("status", "unknown"),
-        "sync_duration_sec": round(duration, 3),
-        "added": result.get("added", 0),
-        "updated": result.get("updated", 0),
-        "deleted": result.get("deleted", 0),
-        "unchanged": result.get("unchanged", 0),
-        "errors": result.get("errors", []),
-        "thresholds": threshold_result,
+        "status": "success",
+        "duration_sec": round(duration, 3),
+        "layers": eval_result.get("layers", {}),
+        "thresholds": eval_result.get("thresholds", {}),
         "retrieval_evaluated": retrieval_result is not None,
         "report_path": report_path,
     }
@@ -181,7 +175,32 @@ async def get_latest_thresholds(name: str):
     try:
         with open(latest) as f:
             data = json.load(f)
-        threshold_result = check_thresholds(data)
-        return threshold_result
+        thresholds = data.get("thresholds", {})
+
+        # Normalize results to flat array if it's still nested (old reports)
+        results = thresholds.get("results", {})
+        if isinstance(results, dict):
+            flat = []
+            failures = thresholds.get("failures", [])
+            for layer_name, metrics in results.items():
+                if isinstance(metrics, dict):
+                    for metric_name, check in metrics.items():
+                        if isinstance(check, dict):
+                            flat.append({
+                                "layer": layer_name,
+                                "metric": metric_name,
+                                "value": check.get("value"),
+                                "threshold": check.get("threshold", {}),
+                                "passed": check.get("passed", False),
+                            })
+            thresholds["results"] = flat
+            thresholds["summary"] = {
+                "total": len(flat),
+                "passed": sum(1 for r in flat if r["passed"]),
+                "failed": sum(1 for r in flat if not r["passed"]),
+            }
+            thresholds["all_passed"] = len(failures) == 0
+
+        return thresholds
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Threshold check failed: {exc}")

@@ -228,23 +228,32 @@ def _run_connector_file_ingest(
             logger.warning("Evaluation failed for %s: %s", source_path, eval_exc)
 
     # Return the original keys plus evaluation data
-    result = {
-        "document_count": doc_count,
-        "chunk_count": chunk_count,
-        "document_id": document_id,
-        "collection_name": collection_name,
-        # Evaluation data
-        "evaluation": {
-            "documents": documents,
-            "chunks": chunks,
-            "embeddings": embeddings,
-            "errors": errors,
-            "file_size_bytes": file_size_bytes,
-            "stage_timings": stage_timings,
-        },
-        "eval_result": eval_result,
-    }
-    return result
+        result = {
+            "document_count": doc_count,
+            "chunk_count": chunk_count,
+            "document_id": document_id,
+            "collection_name": collection_name,
+            # Evaluation data
+            "evaluation": {
+                "documents": documents,
+                "chunks": chunks,
+                "embeddings": embeddings,
+                "errors": errors,
+                "file_size_bytes": eval_file_sizes,
+            },
+            "eval_result": eval_result,
+        }
+
+        # Add aggregated layer totals for API convenience
+        if eval_result and isinstance(eval_result, dict):
+            result["evaluation"]["layers"] = {
+                "extraction": eval_result.get("extraction_summary"),
+                "chunking": eval_result.get("chunking_summary"),
+                "embedding": eval_result.get("embedding_summary"),
+                "retrieval": eval_result.get("retrieval_summary"),
+                "pipeline": eval_result.get("pipeline_summary"),
+            }
+        return result
 def _recalculate_collection_counts(db, knowledge_source_name: str) -> None:
     doc_count = IndexedDocumentRepo.count_for_collection(db, knowledge_source_name)
     chunk_count = IndexedDocumentRepo.sum_chunks(db, knowledge_source_name)
@@ -275,6 +284,7 @@ def sync_collection(knowledge_source_name: str) -> dict:
     finally:
         db.close()
 
+    # Initialize stats
     stats = {
         "collection": knowledge_source_name,
         "status": "success",
@@ -360,16 +370,20 @@ def sync_collection(knowledge_source_name: str) -> dict:
                         connector_file_id=connector_file.id,
                         external_id=connector_file.external_id,
                         content_hash=content_hash,
-                        chunk_count=result["chunk_count"],
                         document_id=result.get("document_id"),
+                        chunk_count=result["chunk_count"],
                     )
+
                 except Exception as exc:
                     stats["errors"].append(f"{connector_file.name}: {exc}")
                     logger.exception("Ingest failed for %s", connector_file.name)
-
-            _recalculate_collection_counts(db, knowledge_source_name)
-        finally:
-            db.close()
+                finally:
+                    db.close()
+        except Exception as exc:
+            stats["errors"].append(f"processing connector {connector_id}: {exc}")
+            logger.exception("Failed processing connector %s", connector_id)
+            if 'db' in locals():
+                db.close()
 
     if stats["errors"]:
         stats["status"] = "partial"

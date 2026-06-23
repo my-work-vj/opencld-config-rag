@@ -470,6 +470,100 @@ export type CreateAgentRequest = {
 
 export type UpdateAgentRequest = Partial<CreateAgentRequest>
 
+// ── Evaluation / Metrics ──
+
+export type ExtractionMetrics = {
+  total_documents: number
+  success_rate: number
+  error_rate: number
+  avg_content_length: number
+  content_length_stdev: number
+  format_coverage: Record<string, number>
+  avg_extraction_time_ms: number
+  avg_file_size_bytes: number
+  empty_extraction_rate?: number
+}
+
+export type ChunkingMetrics = {
+  total_chunks: number
+  avg_chunk_size: number
+  chunk_size_stdev: number
+  chunks_per_doc: number
+  duplicate_content_rate: number
+  empty_chunks: number
+  p50: number
+  p95: number
+  p99: number
+}
+
+export type EmbeddingMetrics = {
+  total_embeddings: number
+  embedding_dimensions: number
+  avg_vector_norm: number
+  norm_stdev: number
+  avg_cosine_similarity: number
+  dimension_utilization: number
+  zero_vector_rate: number
+}
+
+export type PipelineHealthMetrics = {
+  status: string
+  total_documents: number
+  total_chunks: number
+  docs_per_second: number | null
+  error_rate: number
+  files_added?: number
+  files_updated?: number
+  files_deleted?: number
+}
+
+export type RetrievalMetrics = {
+  total_questions: number
+  avg_faithfulness: number
+  avg_answer_relevancy: number
+  avg_context_precision: number
+  avg_context_recall: number
+  avg_noise_sensitivity: number
+  thresholds_passed: number
+  thresholds_total: number
+}
+
+export type EvalMetrics = {
+  extraction?: ExtractionMetrics
+  chunking?: ChunkingMetrics
+  embedding?: EmbeddingMetrics
+  pipeline?: PipelineHealthMetrics
+  retrieval?: RetrievalMetrics
+}
+
+export type EvalResult = {
+  collection_name: string
+  timestamp: string
+  status?: string
+  metrics: EvalMetrics
+  layers: EvalMetrics
+  summary?: EvalMetrics
+}
+
+export type ThresholdCheckResult = {
+  layer: string
+  metric: string
+  value: number
+  threshold: { min?: number | null; max?: number | null } | number | string
+  passed: boolean
+}
+
+export type ThresholdReport = {
+  summary: { passed: number; failed: number; total: number }
+  all_passed: boolean
+  results: ThresholdCheckResult[]
+}
+
+export type EvaluationListResponse = {
+  reports: string[]
+  total: number
+}
+
 export type AgentQueryRequest = {
   query: string
   top_k?: number

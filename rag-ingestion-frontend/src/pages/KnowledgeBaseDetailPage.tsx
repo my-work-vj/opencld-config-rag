@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link, useParams, useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, Plus, Trash2 } from 'lucide-react'
+import { ArrowLeft, Plus, Trash2, CheckCircle2, XCircle, AlertTriangle } from 'lucide-react'
 import { api, ApiError } from '@/lib/api'
 import { Card, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card'
 import { Label, Select } from '@/components/ui/Field'
@@ -26,6 +26,15 @@ export function KnowledgeBaseDetailPage() {
   const allCollections = useQuery({
     queryKey: ['vector-collections'],
     queryFn: async () => (await api.vectorCollections()).collections,
+  })
+
+  // Fetch evaluation status for the currently selected collection
+  const evalStatus = useQuery({
+    queryKey: ['eval-latest', addCollection],
+    queryFn: () => api.latestEvaluation(addCollection),
+    enabled: Boolean(addCollection),
+    retry: false,
+    staleTime: 30_000,
   })
 
   const addMutation = useMutation({
@@ -178,6 +187,22 @@ export function KnowledgeBaseDetailPage() {
                 ))}
               </Select>
             </div>
+            {/* Evaluation status for selected collection */}
+            {addCollection && evalStatus.isLoading && (
+              <span className="text-xs text-slate-500">Checking evaluation…</span>
+            )}
+            {addCollection && evalStatus.isError && (
+              <p className="mt-1 flex items-center gap-1 text-xs text-amber-400">
+                <AlertTriangle className="size-3.5" />
+                <span>No evaluation yet. Click "Evaluate" on this collection first.</span>
+              </p>
+            )}
+            {addCollection && evalStatus.data && (
+              <p className="mt-1 flex items-center gap-1 text-xs text-emerald-400">
+                <CheckCircle2 className="size-3.5" />
+                <span>Thresholds OK — ready to add</span>
+              </p>
+            )}
             <Button
               onClick={() => addCollection && addMutation.mutate(addCollection)}
               disabled={!addCollection}

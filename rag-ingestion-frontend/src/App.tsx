@@ -8,6 +8,8 @@ import { DataSourcesPage } from '@/pages/DataSourcesPage'
 import { DataSourceDetailPage } from '@/pages/DataSourceDetailPage'
 import { KnowledgeBasesPage } from '@/pages/KnowledgeBasesPage'
 import { KnowledgeBaseDetailPage } from '@/pages/KnowledgeBaseDetailPage'
+import EvaluationDashboardPage from '@/pages/EvaluationDashboardPage'
+import CollectionEvaluationPage from '@/pages/CollectionEvaluationPage'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -29,6 +31,8 @@ export default function App() {
             <Route path="data-sources/:id" element={<DataSourceDetailPage />} />
             <Route path="collections" element={<CollectionsPage />} />
             <Route path="collections/:name" element={<CollectionDetailPage />} />
+            <Route path="evaluation" element={<EvaluationDashboardPage />} />
+            <Route path="evaluation/:name" element={<CollectionEvaluationPage />} />
             <Route path="knowledge-bases" element={<KnowledgeBasesPage />} />
             <Route path="knowledge-bases/:name" element={<KnowledgeBaseDetailPage />} />
           </Route>

@@ -5,6 +5,7 @@ import {
   Database,
   Home,
   Sparkles,
+  BarChart4,
 } from 'lucide-react'
 import { NavLink, Outlet } from 'react-router-dom'
 import clsx from 'clsx'
@@ -16,6 +17,7 @@ const navItems = [
   { to: '/', label: 'Welcome', icon: Home, end: true },
   { to: '/data-sources', label: 'Data Sources', icon: Cloud },
   { to: '/collections', label: 'Collections', icon: Database },
+  { to: '/evaluation', label: 'Evaluation', icon: BarChart4 },
   { to: '/knowledge-bases', label: 'Knowledge Bases', icon: BookOpen },
 ]
 
