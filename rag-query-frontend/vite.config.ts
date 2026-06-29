@@ -4,6 +4,7 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
 export default defineConfig({
+  base: '/ret_gen/',
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: {
@@ -12,12 +13,6 @@ export default defineConfig({
   },
   server: {
     port: 3000,
-    proxy: {
-      '/api': {
-        target: 'http://localhost:8082',
-        changeOrigin: true,
-        rewrite: (p) => p.replace(/^\/api/, '/api/v1'),
-      },
-    },
+    allowedHosts: true,
   },
 })

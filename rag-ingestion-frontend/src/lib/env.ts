@@ -1,4 +1,4 @@
-export const API_BASE = import.meta.env.VITE_API_BASE ?? '/api'
+export const API_BASE = import.meta.env.VITE_API_BASE ?? '/ingestion/api'
 
 /** Public URL shown in API endpoint cards (dev default matches ingestion service). */
 export const INGESTION_PUBLIC_URL =

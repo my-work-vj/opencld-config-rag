@@ -1,4 +1,4 @@
-export const API_BASE = import.meta.env.VITE_API_BASE ?? '/api'
+export const API_BASE = import.meta.env.VITE_API_BASE ?? '/ret_gen/api'
 
 /** Public URL shown in API endpoint cards (dev default matches query service). */
 export const QUERY_PUBLIC_URL =

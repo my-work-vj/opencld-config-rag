@@ -228,32 +228,32 @@ def _run_connector_file_ingest(
             logger.warning("Evaluation failed for %s: %s", source_path, eval_exc)
 
     # Return the original keys plus evaluation data
-        result = {
-            "document_count": doc_count,
-            "chunk_count": chunk_count,
-            "document_id": document_id,
-            "collection_name": collection_name,
-            # Evaluation data
-            "evaluation": {
-                "documents": documents,
-                "chunks": chunks,
-                "embeddings": embeddings,
-                "errors": errors,
-                "file_size_bytes": eval_file_sizes,
-            },
-            "eval_result": eval_result,
-        }
+    result = {
+        "document_count": doc_count,
+        "chunk_count": chunk_count,
+        "document_id": document_id,
+        "collection_name": collection_name,
+        # Evaluation data
+        "evaluation": {
+            "documents": documents,
+            "chunks": chunks,
+            "embeddings": embeddings,
+            "errors": errors,
+            "file_size_bytes": file_size_bytes,
+        },
+        "eval_result": eval_result,
+    }
 
-        # Add aggregated layer totals for API convenience
-        if eval_result and isinstance(eval_result, dict):
-            result["evaluation"]["layers"] = {
-                "extraction": eval_result.get("extraction_summary"),
-                "chunking": eval_result.get("chunking_summary"),
-                "embedding": eval_result.get("embedding_summary"),
-                "retrieval": eval_result.get("retrieval_summary"),
-                "pipeline": eval_result.get("pipeline_summary"),
-            }
-        return result
+    # Add aggregated layer totals for API convenience
+    if eval_result and isinstance(eval_result, dict):
+        result["evaluation"]["layers"] = {
+            "extraction": eval_result.get("extraction_summary"),
+            "chunking": eval_result.get("chunking_summary"),
+            "embedding": eval_result.get("embedding_summary"),
+            "retrieval": eval_result.get("retrieval_summary"),
+            "pipeline": eval_result.get("pipeline_summary"),
+        }
+    return result
 def _recalculate_collection_counts(db, knowledge_source_name: str) -> None:
     doc_count = IndexedDocumentRepo.count_for_collection(db, knowledge_source_name)
     chunk_count = IndexedDocumentRepo.sum_chunks(db, knowledge_source_name)
@@ -377,11 +377,11 @@ def sync_collection(knowledge_source_name: str) -> dict:
                 except Exception as exc:
                     stats["errors"].append(f"{connector_file.name}: {exc}")
                     logger.exception("Ingest failed for %s", connector_file.name)
-                finally:
-                    db.close()
+
         except Exception as exc:
             stats["errors"].append(f"processing connector {connector_id}: {exc}")
             logger.exception("Failed processing connector %s", connector_id)
+        finally:
             if 'db' in locals():
                 db.close()
 

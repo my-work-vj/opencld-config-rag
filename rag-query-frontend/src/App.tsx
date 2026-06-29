@@ -19,7 +19,7 @@ const queryClient = new QueryClient({
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
+      <BrowserRouter basename="/ret_gen">
         <Routes>
           <Route element={<AppShell />}>
             <Route index element={<WelcomePage />} />
