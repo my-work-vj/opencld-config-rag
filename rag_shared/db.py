@@ -33,12 +33,17 @@ def get_db():
 
 
 def init_pipeline_tables():
-    """Create shared pipeline and knowledge tables."""
+    """Create shared pipeline and knowledge tables + ingestion metadata tables."""
     from rag_shared.models import (
         Agent,
+        ChunkRecord,
         CollectionConnector,
+        CollectionIndexConfig,
         ConnectorFile,
         DataConnector,
+        DocumentRecord,
+        GraphEntityRecord,
+        GraphRelationRecord,
         IndexedDocument,
         KnowledgeBase,
         KnowledgeSource,
@@ -46,6 +51,7 @@ def init_pipeline_tables():
         PromptVersion,
         RagPipeline,
         RagPipelineAudit,
+        SessionMemoryRecord,
     )
     Base.metadata.create_all(bind=engine)
     _migrate_agent_columns()

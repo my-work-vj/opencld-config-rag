@@ -150,6 +150,107 @@ export type PipelineUpdateRequest = Partial<
   Omit<PipelineCreateRequest, 'id'>
 >
 
+
+// ── Index Visualization ──
+
+export type GraphNode = {
+  id: number
+  labels: string[]
+  properties: Record<string, unknown>
+}
+
+export type GraphEdge = {
+  id: number
+  source: number
+  target: number
+  type: string
+  properties: Record<string, unknown>
+}
+
+export type GraphVisualizationResponse = {
+  nodes: GraphNode[]
+  edges: GraphEdge[]
+  node_count: number
+  edge_count: number
+  message?: string
+}
+
+export type VectorPoint = {
+  id: string
+  vector_dims: Record<string, unknown>
+  payload: Record<string, string>
+}
+
+export type VectorVisualizationResponse = {
+  available: boolean
+  name: string
+  points_count: number
+  vectors_count: number
+  status: string
+  config: Record<string, unknown>
+  sample_points: VectorPoint[]
+  sample_count: number
+  message?: string
+}
+
+export type SparseVisualizationResponse = {
+  available: boolean
+  name: string
+  points_count: number
+  sparse_config: string
+  sample_sparse_entries: {
+    id: string
+    sparse_indices: number
+    sparse_values: number
+    non_zero: number
+  }[]
+  sample_count: number
+  message?: string
+}
+
+export type MetadataDocRecord = {
+  id: string | number
+  filename: string
+  chunk_count: string
+  created_at: string
+}
+
+export type MetadataChunkRecord = {
+  chunk_index: string
+  token_count: string
+}
+
+export type MetadataVisualizationResponse = {
+  available: boolean
+  document_count: number
+  chunk_count: number
+  documents: Record<string, string>[]
+  sample_chunks: Record<string, string>[]
+  message?: string
+}
+
+export type MemoryEntry = {
+  key: string
+  value: string
+  type: string
+  ttl: number
+}
+
+export type MemoryVisualizationResponse = {
+  available: boolean
+  total_keys: number
+  entries: MemoryEntry[]
+  message?: string
+}
+
+export type IndexConfig = {
+  vector: boolean
+  sparse: boolean
+  graph: boolean
+  metadata: boolean
+  memory: boolean
+}
+
 // ── Knowledge Source ──
 
 export type KnowledgeSource = {
@@ -169,6 +270,15 @@ export type KnowledgeSource = {
   query_stages?: Record<string, StageConfig>
   chat_model?: string
   reranker_model?: string
+  metadata?: {
+    index_config?: {
+      vector?: boolean
+      sparse?: boolean
+      graph?: boolean
+      metadata?: boolean
+      memory?: boolean
+    }
+  }
   created_at?: string | null
 }
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import threading
 from pathlib import Path
 
@@ -80,6 +81,7 @@ def _collection_info(record: KnowledgeSource, db) -> KnowledgeSourceInfo:
         monitor_enabled=bool(connector_ids),
         ingestion_stages=ingestion_stages,
         query_stages=query_stages,
+        metadata=meta,
         chat_model=meta.get("chat_model") or "",
         reranker_model=meta.get("reranker_model") or "",
         created_at=record.created_at.isoformat() if record.created_at else None,
@@ -92,9 +94,22 @@ def _build_ingestion_stages(req: CreateCollectionRequest, collection_name: str) 
         if stage_name in INGESTION_STAGES:
             stages[stage_name] = cfg
     stages["embedding"]["config"]["model"] = req.embedding_model
-    stages["indexing"]["config"]["collection_name"] = collection_name
-    stages["indexing"]["config"]["vector_size"] = req.vector_size
-    stages["indexing"]["config"]["model"] = req.embedding_model
+
+    # Handle both single-index and multi-index indexing stage config
+    indexing = stages.get("indexing", {})
+    if "strategy" in indexing:
+        # Single-index format
+        indexing["config"]["collection_name"] = collection_name
+        indexing["config"]["vector_size"] = req.vector_size
+        indexing["config"]["model"] = req.embedding_model
+    else:
+        # Multi-index format — inject into each sub-index
+        for idx_name, idx_cfg in indexing.items():
+            if isinstance(idx_cfg, dict):
+                idx_cfg.setdefault("config", {})
+                idx_cfg["config"]["collection_name"] = collection_name
+                idx_cfg["config"]["vector_size"] = req.vector_size
+                idx_cfg["config"]["model"] = req.embedding_model
     return stages
 
 
@@ -224,6 +239,9 @@ async def create_collection(req: CreateCollectionRequest):
             "vector_size": req.vector_size,
             "monitor_enabled": True,
         }
+        # Merge any extra metadata (e.g., index_config) from the request
+        if req.metadata:
+            meta.update(req.metadata)
 
         record = KnowledgeSource(
             name=req.name,
@@ -284,9 +302,19 @@ async def update_collection(name: str, req: UpdateCollectionRequest):
                 if stage_name in INGESTION_STAGES:
                     current[stage_name] = cfg
             current["embedding"]["config"]["model"] = record.embedding_model
-            current["indexing"]["config"]["collection_name"] = record.collection_name
-            current["indexing"]["config"]["vector_size"] = record.vector_size
-            current["indexing"]["config"]["model"] = record.embedding_model
+            # Handle both single-index and multi-index indexing stage config
+            indexing = current.get("indexing", {})
+            if "strategy" in indexing:
+                indexing["config"]["collection_name"] = record.collection_name
+                indexing["config"]["vector_size"] = record.vector_size
+                indexing["config"]["model"] = record.embedding_model
+            else:
+                for idx_name, idx_cfg in indexing.items():
+                    if isinstance(idx_cfg, dict):
+                        idx_cfg.setdefault("config", {})
+                        idx_cfg["config"]["collection_name"] = record.collection_name
+                        idx_cfg["config"]["vector_size"] = record.vector_size
+                        idx_cfg["config"]["model"] = record.embedding_model
             meta["ingestion_stages"] = current
 
         if req.query_stages is not None:
@@ -529,3 +557,216 @@ async def ingest_collection_from_connector(name: str, req: CollectionIngestFromC
         "chunk_count": total_chunks,
         "errors": errors,
     }
+
+
+# ── Index Visualization ────────────────────────────────────────
+
+def _resolve_qdrant_collection(name: str) -> str:
+    """Resolve the display name to the internal Qdrant collection_name."""
+    db = SharedSession()
+    try:
+        try:
+            record = KnowledgeSourceRepo.get(db, name)
+            return record.collection_name
+        except KnowledgeSourceNotFoundError:
+            return name
+    finally:
+        db.close()
+
+@router.get("/collections/{name}/visualize/graph")
+async def visualize_graph(name: str):
+    """Return nodes and edges from Neo4j for the given collection."""
+    try:
+        from neo4j import GraphDatabase
+        uri = os.getenv("NEO4J_URI", "bolt://localhost:7687")
+        user = os.getenv("NEO4J_USER", "neo4j")
+        password = os.getenv("NEO4J_PASSWORD", "password")
+        driver = GraphDatabase.driver(uri, auth=(user, password))
+    except Exception as e:
+        logger.warning(f"Neo4j connection failed: {e}")
+        raise HTTPException(status_code=503, detail=f"Neo4j unavailable: {e}")
+    try:
+        with driver.session() as session:
+            result = session.run(
+                "MATCH (n {collection_name: $name}) OPTIONAL MATCH (n)-[r]->(m {collection_name: $name}) RETURN n, r, m",
+                name=name,
+            )
+            node_ids: set[int] = set()
+            edge_ids: set[int] = set()
+            nodes_map: dict[int, dict] = {}
+            edges: list[dict] = []
+            for record in result:
+                n = record.get("n")
+                r = record.get("r")
+                m = record.get("m")
+                if n:
+                    nid = n.get("id", id(n))
+                    if nid not in node_ids:
+                        node_ids.add(nid)
+                        nodes_map[nid] = {"id": nid, "labels": list(n.labels) if hasattr(n, "labels") else [], "properties": dict(n)}
+                if m:
+                    mid = m.get("id", id(m))
+                    if mid not in node_ids:
+                        node_ids.add(mid)
+                        nodes_map[mid] = {"id": mid, "labels": list(m.labels) if hasattr(m, "labels") else [], "properties": dict(m)}
+                if r and n and m:
+                    eid = id(r)
+                    if eid not in edge_ids:
+                        edge_ids.add(eid)
+                        edges.append({"id": eid, "source": n.get("id", id(n)), "target": m.get("id", id(m)), "type": r.type if hasattr(r, "type") else str(type(r)), "properties": dict(r)})
+            if not nodes_map:
+                count_result = session.run("MATCH (n {collection_name: $name}) RETURN count(n) as c", name=name).single()
+                return {"nodes": [], "edges": [], "message": f"No graph data for collection '{name}'", "node_count": count_result["c"] if count_result else 0, "edge_count": 0}
+            return {"nodes": list(nodes_map.values()), "edges": edges, "node_count": len(nodes_map), "edge_count": len(edges)}
+    except Exception as e:
+        logger.error(f"Neo4j query failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        driver.close()
+
+
+@router.get("/collections/{name}/visualize/vectors")
+async def visualize_vectors(name: str):
+    """Return Qdrant collection stats and sample points for dense vectors."""
+    qname = _resolve_qdrant_collection(name)
+    try:
+        from qdrant_client import QdrantClient
+        qc = QdrantClient(host=os.getenv("QDRANT_HOST", "localhost"), port=int(os.getenv("QDRANT_PORT", "6333")))
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Qdrant unavailable: {e}")
+    try:
+        try:
+            info = qc.get_collection(qname)
+        except Exception:
+            matched = [c.name for c in qc.get_collections().collections if qname.lower() in c.name.lower()]
+            if matched:
+                qname = matched[0]
+                info = qc.get_collection(qname)
+            else:
+                return {"available": False, "collections": [c.name for c in qc.get_collections().collections], "message": f"Collection '{name}' not found"}
+        scroll = qc.scroll(collection_name=qname, limit=10, with_vectors=True, with_payload=True)
+        points = scroll[0] if scroll else []
+        samples = []
+        for p in points:
+            vec = p.vector
+            vi = {}
+            if isinstance(vec, dict):
+                vi = {k: _short_vec(v) for k, v in vec.items()}
+            elif vec is not None:
+                vi = {"dense": _short_vec(vec)}
+            samples.append({"id": str(p.id), "vector_dims": vi, "payload": {k: str(v)[:200] for k, v in (p.payload or {}).items()}})
+        cfg = info.config if hasattr(info, "config") else {}
+        params = {}
+        if hasattr(cfg, "params"):
+            params = {"vectors": str(cfg.params.vectors) if hasattr(cfg.params, "vectors") else "N/A", "sparse_vectors": str(cfg.params.sparse_vectors) if hasattr(cfg.params, "sparse_vectors") else None}
+        return {
+            "available": True, "name": qname,
+            "points_count": getattr(info, "points_count", 0), "vectors_count": getattr(info, "vectors_count", 0),
+            "status": getattr(info, "status", "unknown"), "config": params,
+            "sample_points": samples, "sample_count": len(samples),
+        }
+    except Exception as e:
+        logger.error(f"Qdrant query failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/collections/{name}/visualize/sparse")
+async def visualize_sparse(name: str):
+    """Return Qdrant sparse vector data for the collection."""
+    qname = _resolve_qdrant_collection(name)
+    try:
+        from qdrant_client import QdrantClient
+        qc = QdrantClient(host=os.getenv("QDRANT_HOST", "localhost"), port=int(os.getenv("QDRANT_PORT", "6333")))
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Qdrant unavailable: {e}")
+    try:
+        try:
+            info = qc.get_collection(qname)
+        except Exception:
+            matched = [c.name for c in qc.get_collections().collections if qname.lower() in c.name.lower()]
+            if matched:
+                qname = matched[0]
+                info = qc.get_collection(qname)
+            else:
+                return {"available": False, "message": f"Collection '{name}' not found"}
+        has_sparse = False
+        if hasattr(info, "config") and hasattr(info.config, "params") and hasattr(info.config.params, "sparse_vectors"):
+            has_sparse = info.config.params.sparse_vectors is not None
+        samples = []
+        if has_sparse:
+            scroll = qc.scroll(collection_name=qname, limit=5, with_vectors=True, with_payload=True)
+            for p in scroll[0] if scroll else []:
+                vec = p.vector
+                if isinstance(vec, dict) and "sparse" in vec:
+                    sv = vec["sparse"]
+                    if hasattr(sv, "indices") and hasattr(sv, "values"):
+                        samples.append({"id": str(p.id), "sparse_indices": len(sv.indices), "sparse_values": len(sv.values), "non_zero": min(len(sv.indices), 20)})
+        return {"available": has_sparse, "name": qname, "points_count": getattr(info, "points_count", 0), "sparse_config": str(has_sparse), "sample_sparse_entries": samples, "sample_count": len(samples)}
+    except Exception as e:
+        logger.error(f"Sparse query failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/collections/{name}/visualize/metadata")
+async def visualize_metadata(name: str):
+    """Return metadata records from PostgreSQL for the collection."""
+    try:
+        from sqlalchemy import create_engine, text
+        pg_user = os.getenv("POSTGRES_USER", "rag_user")
+        pg_pass = os.getenv("POSTGRES_PASSWORD", "rag_pass")
+        pg_host = os.getenv("POSTGRES_HOST", "localhost")
+        pg_port = os.getenv("POSTGRES_PORT", "5432")
+        pg_db = os.getenv("POSTGRES_DB", "rag_platform")
+        engine = create_engine(f"postgresql://{pg_user}:{pg_pass}@{pg_host}:{pg_port}/{pg_db}")
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"PostgreSQL unavailable: {e}")
+    try:
+        with engine.connect() as conn:
+            docs = [dict(r._mapping) for r in conn.execute(text("SELECT id, filename, chunk_count, created_at FROM documents WHERE collection_name = :name ORDER BY created_at DESC LIMIT 20"), {"name": name})]
+            doc_count = conn.execute(text("SELECT COUNT(*) FROM documents WHERE collection_name = :name"), {"name": name}).scalar() or 0
+            chunks = []
+            try:
+                chunks = [dict(r._mapping) for r in conn.execute(text("SELECT chunk_index, token_count FROM chunks WHERE collection_name = :name ORDER BY chunk_index LIMIT 10"), {"name": name})]
+            except Exception:
+                pass
+            return {"available": True, "document_count": doc_count, "chunk_count": len(chunks), "documents": [{k: str(v)[:150] for k, v in d.items()} for d in docs], "sample_chunks": [{k: str(v)[:120] for k, v in c.items()} for c in chunks]}
+    except Exception as e:
+        logger.error(f"PostgreSQL query failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/collections/{name}/visualize/memory")
+async def visualize_memory(name: str):
+    """Return memory store data from Redis for the collection."""
+    try:
+        import redis as redis_mod
+        rh = os.getenv("REDIS_HOST", "localhost")
+        rp = int(os.getenv("REDIS_PORT", "6379"))
+        rpwd = os.getenv("REDIS_PASSWORD", None)
+        kwargs = {"host": rh, "port": rp, "decode_responses": True}
+        if rpwd: kwargs["password"] = rpwd
+        r = redis_mod.Redis(**kwargs)
+        r.ping()
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Redis unavailable: {e}")
+    try:
+        keys = r.keys(f"*{name}*")
+        entries = []
+        for k in keys[:50]:
+            ks = str(k)
+            try:
+                entries.append({"key": ks, "value": str(r.get(k))[:200], "type": r.type(ks), "ttl": r.ttl(k)})
+            except Exception:
+                pass
+        return {"available": True, "total_keys": len(keys), "entries": entries}
+    except Exception as e:
+        logger.error(f"Redis query failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+def _short_vec(v, max_len: int = 10) -> dict:
+    """Convert vector to short preview."""
+    if v is None:
+        return {"length": 0, "preview": []}
+    vl = list(v) if hasattr(v, '__iter__') else []
+    return {"length": len(vl), "preview": [round(float(x), 6) for x in vl[:max_len]]}

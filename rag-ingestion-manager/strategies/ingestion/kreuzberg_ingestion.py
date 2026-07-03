@@ -47,7 +47,29 @@ class KreuzbergIngestion(BaseIngestionStrategy):
                 continue
             try:
                 import asyncio
-                result = asyncio.run(extract_file(str(p)))
+                # kreuzberg's extract_file is async, but we're called from sync
+                # contexts (background threads, FastAPI sync endpoints, etc.)
+                # Use a dedicated event loop in a new thread to handle all cases.
+                import threading
+                thread_result = []
+                thread_exc = []
+                def _run_extract():
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    try:
+                        from kreuzberg import extract_file
+                        r = loop.run_until_complete(extract_file(str(p)))
+                        thread_result.append(r)
+                    except Exception as e:
+                        thread_exc.append(e)
+                    finally:
+                        loop.close()
+                t = threading.Thread(target=_run_extract, daemon=True)
+                t.start()
+                t.join()
+                if thread_exc:
+                    raise thread_exc[0]
+                result = thread_result[0]
                 content = result.content or ""
                 if not content.strip():
                     logger.warning("Empty extraction from %s", p.name)

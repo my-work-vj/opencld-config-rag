@@ -11,8 +11,6 @@ from typing import Any, Dict, List, Tuple
 from connectors.pathway.container import container_to_host_path
 from connectors.google_drive import source_type_for_path
 from connectors.runner import connector_supports_ui_upload, run_connector_sync
-from core.db import SessionLocal
-from core.models import DocumentRecord
 from core.pipeline import IngestionPipeline
 from monitoring.qdrant_ops import delete_connector_file_vectors
 from rag_shared.collection_connector_repo import CollectionConnectorRepo
@@ -140,11 +138,24 @@ def _run_connector_file_ingest(
 
         # Only proceed if embedding succeeded
         if not errors:
-            # Indexing stage
+            # Sparse embedding stage (optional — only if config has sparse_embedding)
+            sparse_vectors = []
+            try:
+                sparse_vectors = pipeline.run_sparse_embedding(chunks)
+            except Exception as e:
+                # Sparse embedding is optional — don't fail the pipeline
+                logger.debug("Sparse embedding skipped or failed: %s", e)
+
+        # Only proceed if embedding succeeded
+        if not errors:
+            # Indexing stage — multi-index dispatch (Qdrant dense + sparse + metadata + Neo4j)
             try:
                 t0 = time.time()
                 pipeline.run_indexing(
-                    embeddings,
+                    embeddings=embeddings,
+                    sparse_vectors=sparse_vectors,
+                    documents=documents,
+                    chunks=chunks,
                     config={
                         "collection_name": collection_name,
                         "vector_size": vector_size,
@@ -163,31 +174,12 @@ def _run_connector_file_ingest(
             db.close()
         raise RuntimeError(f"Ingestion failed: {exc}") from exc
 
+    # Document + chunk metadata persistence is now handled
+    # by the metadata_indexing strategy in the pipeline.
+    # The code below is kept for backward compat evaluation metrics only.
     doc_count = len(documents)
     chunk_count = len(chunks)
     document_id = documents[0].id if documents else None
-
-    try:
-        local_db = SessionLocal()
-        for doc in documents:
-            record = DocumentRecord(
-                filename=doc.filename or "unknown",
-                pipeline_name=pipeline.name,
-                collection_name=collection_name,
-                chunk_count=len([c for c in chunks if c.document_id == doc.id]),
-                content_preview=doc.content[:200],
-                metadata_json={
-                    **doc.metadata,
-                    **connector_metadata,
-                    "collection_name": knowledge_source_name,
-                    "ingest_source_path": source_path,
-                },
-            )
-            local_db.add(record)
-        local_db.commit()
-        local_db.close()
-    except Exception as exc:
-        logger.warning("Could not save document metadata: %s", exc)
 
     # Run evaluation on this file's ingestion
     eval_result = None

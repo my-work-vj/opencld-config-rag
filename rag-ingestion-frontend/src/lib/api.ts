@@ -14,6 +14,7 @@ import type {
   DataConnectorUploadResponse,
   EvalResult,
   EvaluationListResponse,
+  GraphVisualizationResponse,
   HealthResponse,
   IndexedDocumentListResponse,
   IngestRequest,
@@ -24,11 +25,15 @@ import type {
   KnowledgeSourceIngestRequest,
   KnowledgeSourceIngestResponse,
   LlmModels,
+  MemoryVisualizationResponse,
+  MetadataVisualizationResponse,
   PathwayDockerHealth,
   QdrantCollectionInfo,
+  SparseVisualizationResponse,
   StrategiesMap,
   ThresholdReport,
   UpdateCollectionRequest,
+  VectorVisualizationResponse,
 } from '@/types/api'
 
 
@@ -404,6 +409,33 @@ export const api = {
   evaluationThresholds: (name: string) =>
     request<ThresholdReport>(
       `/collections/${encodeURIComponent(name)}/evaluations/latest/thresholds`,
+    ),
+
+  // ── Index Visualization ──
+
+  visualizeGraph: (name: string) =>
+    request<GraphVisualizationResponse>(
+      `/collections/${encodeURIComponent(name)}/visualize/graph`,
+    ),
+
+  visualizeVectors: (name: string) =>
+    request<VectorVisualizationResponse>(
+      `/collections/${encodeURIComponent(name)}/visualize/vectors`,
+    ),
+
+  visualizeSparse: (name: string) =>
+    request<SparseVisualizationResponse>(
+      `/collections/${encodeURIComponent(name)}/visualize/sparse`,
+    ),
+
+  visualizeMetadata: (name: string) =>
+    request<MetadataVisualizationResponse>(
+      `/collections/${encodeURIComponent(name)}/visualize/metadata`,
+    ),
+
+  visualizeMemory: (name: string) =>
+    request<MemoryVisualizationResponse>(
+      `/collections/${encodeURIComponent(name)}/visualize/memory`,
     ),
 }
 

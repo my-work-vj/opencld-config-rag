@@ -14,5 +14,12 @@ export default defineConfig({
   server: {
     port: 3001,
     allowedHosts: true,
+    proxy: {
+      '/ingestion/api': {
+        target: 'http://localhost:8081/api/v1',
+        changeOrigin: true,
+        rewrite: (p) => p.replace(/^\/ingestion\/api/, ''),
+      },
+    },
   },
 })

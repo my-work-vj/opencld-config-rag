@@ -2,8 +2,61 @@
 
 from datetime import datetime
 from typing import Any, Optional
+from enum import Enum
 
 from pydantic import BaseModel, Field, field_validator
+
+
+class IndexType(str, Enum):
+    """Types of indexes that can be enabled for a collection."""
+    VECTOR = "vector"
+    SPARSE = "sparse"
+    GRAPH = "graph"
+    METADATA = "metadata"
+    MEMORY = "memory"
+
+
+# ── Index Configuration Schemas ──
+
+
+class CollectionIndexConfigBase(BaseModel):
+    """Base configuration for collection index settings."""
+    collection_name: str = Field(..., description="Name of the collection")
+
+
+class CollectionIndexConfigResponse(CollectionIndexConfigBase):
+    """Response model for collection index configuration."""
+    enable_vector_index: bool = Field(default=True, description="Enable dense vector indexing (Qdrant)")
+    enable_sparse_index: bool = Field(default=False, description="Enable sparse/BMI25 indexing (Qdrant)")
+    enable_graph_index: bool = Field(default=False, description="Enable graph indexing (Neo4j)")
+    enable_metadata_index: bool = Field(default=True, description="Enable metadata indexing (PostgreSQL)")
+    enable_memory_index: bool = Field(default=False, description="Enable memory indexing (Redis)")
+    
+    # Configuration objects for each index type
+    vector_index_config: dict[str, Any] = Field(default_factory=dict, description="Qdrant-specific configuration")
+    sparse_index_config: dict[str, Any] = Field(default_factory=dict, description="BMI25/sparse configuration")
+    graph_index_config: dict[str, Any] = Field(default_factory=dict, description="Neo4j-specific configuration")
+    metadata_index_config: dict[str, Any] = Field(default_factory=dict, description="PostgreSQL-specific configuration")
+    memory_index_config: dict[str, Any] = Field(default_factory=dict, description="Redis-specific configuration")
+
+
+class CollectionIndexConfigUpdate(BaseModel):
+    """Update model for collection index configuration."""
+    enable_vector_index: Optional[bool] = Field(None, description="Enable/disable dense vector indexing")
+    enable_sparse_index: Optional[bool] = Field(None, description="Enable/disable sparse/BMI25 indexing")
+    enable_graph_index: Optional[bool] = Field(None, description="Enable/disable graph indexing")
+    enable_metadata_index: Optional[bool] = Field(None, description="Enable/disable metadata indexing")
+    enable_memory_index: Optional[bool] = Field(None, description="Enable/disable memory indexing")
+    
+    # Configuration objects - partial updates allowed
+    vector_index_config: Optional[dict[str, Any]] = Field(None, description="Qdrant-specific configuration updates")
+    sparse_index_config: Optional[dict[str, Any]] = Field(None, description="BMI25/sparse configuration updates")
+    graph_index_config: Optional[dict[str, Any]] = Field(None, description="Neo4j-specific configuration updates")
+    metadata_index_config: Optional[dict[str, Any]] = Field(None, description="PostgreSQL-specific configuration updates")
+    memory_index_config: Optional[dict[str, Any]] = Field(None, description="Redis-specific configuration updates")
+
+
+# ── Pipeline Schemas —— (rest of the file remains the same)
 
 
 class StageConfig(BaseModel):
@@ -77,7 +130,7 @@ class PipelineListResponse(BaseModel):
     total: int
 
 
-# ── Knowledge Source ──
+# ── Knowledge Source ——
 
 
 class CreateKnowledgeSourceRequest(BaseModel):
@@ -109,6 +162,7 @@ class KnowledgeSourceInfo(BaseModel):
     monitor_enabled: bool = False
     ingestion_stages: dict[str, Any] = Field(default_factory=dict)
     query_stages: dict[str, Any] = Field(default_factory=dict)
+    metadata: Optional[dict[str, Any]] = None
     chat_model: str = ""
     reranker_model: str = ""
     created_at: Optional[str] = None
@@ -140,6 +194,10 @@ class CreateCollectionRequest(BaseModel):
     query_stages: dict[str, StageConfig] = Field(
         default_factory=dict,
         description="knowledge_store, retrieval, reranking, response stage configs",
+    )
+    metadata: Optional[dict[str, Any]] = Field(
+        None,
+        description="Extra metadata (e.g., index_config)",
     )
     chat_model: str = Field("llama-3.3-70b-versatile", description="LLM for response stage")
     reranker_model: str = Field("rerank-english-v3.0", description="Reranker model")
@@ -211,9 +269,10 @@ class DataConnectorUploadResponse(BaseModel):
 
 class KnowledgeSourceList(BaseModel):
     sources: list[KnowledgeSourceInfo]
+    total: int
 
 
-# ── Data Connectors (Pathway-powered external sources) ──
+# ── Data Connectors (Pathway-powered external sources) ——
 
 
 class ConnectorTypeInfo(BaseModel):
@@ -271,7 +330,7 @@ class DataConnectorTestResponse(BaseModel):
     sample_items: list[dict[str, Any]] = Field(default_factory=list)
 
 
-# ── Knowledge Base ──
+# ── Knowledge Base ——
 
 
 class CreateKnowledgeBaseRequest(BaseModel):
@@ -299,7 +358,7 @@ class KnowledgeBaseList(BaseModel):
     knowledge_bases: list[KnowledgeBaseInfo]
 
 
-# ── Prompt Template ──
+# ── Prompt Template ——
 
 
 class CreatePromptTemplateRequest(BaseModel):
@@ -349,12 +408,14 @@ class PromptTemplateDetail(BaseModel):
     versions: list[PromptVersionInfo]
     created_at: Optional[str] = None
 
+    model_config = {"from_attributes": True}
+
 
 class PromptTemplateList(BaseModel):
     templates: list[PromptTemplateSummary]
 
 
-# ── Agent ──
+# ── Agent ——
 
 
 class CreateAgentRequest(BaseModel):
@@ -374,10 +435,10 @@ class CreateAgentRequest(BaseModel):
     )
     retrieval_strategy: str = Field("multi_collection", description="Retrieval strategy")
     top_k: int = Field(5, description="Number of chunks to retrieve")
-    reranking_strategy: str = Field("pass_through", description="Reranking strategy name")
+    reranker_strategy: str = Field("pass_through", description="Reranking strategy name")
     response_strategy: str = Field("contextual_response", description="Response strategy name")
     retrieval_config: Optional[dict[str, Any]] = Field(default_factory=dict)
-    reranking_config: Optional[dict[str, Any]] = Field(default_factory=dict)
+    reranker_config: Optional[dict[str, Any]] = Field(default_factory=dict)
     response_config: Optional[dict[str, Any]] = Field(default_factory=dict)
     query_stages: Optional[dict[str, Any]] = Field(default_factory=dict)
     is_active: bool = True
@@ -394,10 +455,10 @@ class UpdateAgentRequest(BaseModel):
     system_prompt: Optional[str] = None
     retrieval_strategy: Optional[str] = None
     top_k: Optional[int] = None
-    reranking_strategy: Optional[str] = None
+    reranker_strategy: Optional[str] = None
     response_strategy: Optional[str] = None
     retrieval_config: Optional[dict[str, Any]] = None
-    reranking_config: Optional[dict[str, Any]] = None
+    reranker_config: Optional[dict[str, Any]] = None
     response_config: Optional[dict[str, Any]] = None
     query_stages: Optional[dict[str, Any]] = None
     is_active: Optional[bool] = None
@@ -416,10 +477,10 @@ class AgentInfo(BaseModel):
     system_prompt: str
     retrieval_strategy: str
     top_k: int
-    reranking_strategy: str
+    reranker_strategy: str = "pass_through"
     response_strategy: str = "contextual_response"
     retrieval_config: dict[str, Any] = Field(default_factory=dict)
-    reranking_config: dict[str, Any] = Field(default_factory=dict)
+    reranker_config: dict[str, Any] = Field(default_factory=dict)
     response_config: dict[str, Any] = Field(default_factory=dict)
     query_stages: dict[str, Any] = Field(default_factory=dict)
     is_active: bool
@@ -456,6 +517,6 @@ class AgentQueryResponse(BaseModel):
     sources_searched: list[str]
     response: str
     retrieval_method: str
-    chunks: list[ChunkResult]
     timings: dict[str, float]
     total_time_ms: float
+    chunks: list[ChunkResult]

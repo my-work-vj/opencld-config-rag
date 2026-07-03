@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams, useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, Cloud, Database, Settings2, Trash2, Upload } from 'lucide-react'
+import { ArrowLeft, Cloud, Database, Eye, GitBranch, MemoryStick, Settings2, Table, Trash2, Upload, Waves } from 'lucide-react'
 import { api, ApiError } from '@/lib/api'
 import { AUTO_SYNC_POLL_MS, syncPollInterval } from '@/lib/poll'
 import { Card, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card'
@@ -15,6 +15,14 @@ import {
   DEFAULT_INGESTION_STAGES,
 } from '@/lib/stage-defaults'
 import { stringifyStageConfig } from '@/components/StageConfigEditor'
+import { FloatingModal } from '@/components/visualization/FloatingModal'
+import { GraphVisualization } from '@/components/visualization/GraphVisualization'
+import {
+  MemoryVisualization,
+  MetadataVisualization,
+  SparseVisualization,
+  VectorVisualization,
+} from '@/components/visualization/IndexVisualizations'
 
 export function CollectionDetailPage() {
   const { name } = useParams<{ name: string }>()
@@ -32,6 +40,8 @@ export function CollectionDetailPage() {
   const [stageStrategies, setStageStrategies] = useState<Record<string, string>>({})
   const [stageConfigs, setStageConfigs] = useState<Record<string, string>>({})
   const [ingestionMode, setIngestionMode] = useState<IngestionMode>('document_plain')
+  const [vizModal, setVizModal] = useState<string | null>(null)
+  const [vizError, setVizError] = useState<string | null>(null)
 
   const llmModels = useQuery({
     queryKey: ['llm-models'],
@@ -164,6 +174,43 @@ export function CollectionDetailPage() {
       embeddingModel,
     ],
   )
+
+  // ── Viz query — fetches from whichever endpoint the modal needs ──
+  const vizQuery = useQuery({
+    queryKey: ['collection-viz', decodedName, vizModal],
+    queryFn: async () => {
+      setVizError(null)
+      switch (vizModal) {
+        case 'graph':
+          return { kind: 'graph' as const, data: await api.visualizeGraph(decodedName) }
+        case 'vector':
+          return { kind: 'vector' as const, data: await api.visualizeVectors(decodedName) }
+        case 'sparse':
+          return { kind: 'sparse' as const, data: await api.visualizeSparse(decodedName) }
+        case 'metadata':
+          return { kind: 'metadata' as const, data: await api.visualizeMetadata(decodedName) }
+        case 'memory':
+          return { kind: 'memory' as const, data: await api.visualizeMemory(decodedName) }
+        default:
+          throw new Error(`Unknown viz type: ${vizModal}`)
+      }
+    },
+    enabled: Boolean(vizModal),
+    retry: 1,
+    staleTime: 30_000,
+  })
+
+  const handleCloseViz = () => {
+    setVizModal(null)
+    setVizError(null)
+  }
+
+  const vizTitle =
+    vizModal === 'graph' ? 'Graph Visualization' :
+    vizModal === 'vector' ? 'Dense Vector Index' :
+    vizModal === 'sparse' ? 'Sparse Vector Index' :
+    vizModal === 'metadata' ? 'Metadata Index' :
+    vizModal === 'memory' ? 'Memory Store' : 'Index Visualization'
 
   if (collection.isLoading) {
     return (
@@ -310,6 +357,61 @@ export function CollectionDetailPage() {
                 </Badge>
               ))}
             </div>
+            {/* ── Index Visualization Buttons ── */}
+            {c?.metadata?.index_config && (
+              <div className="mt-4 border-t border-slate-700 pt-4">
+                <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">
+                  Index visualizations
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {c.metadata.index_config.graph && (
+                    <button
+                      onClick={() => setVizModal('graph')}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-cyan-700 bg-cyan-900/30 px-3 py-1.5 text-xs font-medium text-cyan-300 transition-colors hover:bg-cyan-800/50 hover:text-cyan-200"
+                    >
+                      <GitBranch className="size-3.5" />
+                      Graph
+                    </button>
+                  )}
+                  {c.metadata.index_config.vector && (
+                    <button
+                      onClick={() => setVizModal('vector')}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-blue-700 bg-blue-900/30 px-3 py-1.5 text-xs font-medium text-blue-300 transition-colors hover:bg-blue-800/50 hover:text-blue-200"
+                    >
+                      <Waves className="size-3.5" />
+                      Dense Vectors
+                    </button>
+                  )}
+                  {c.metadata.index_config.sparse && (
+                    <button
+                      onClick={() => setVizModal('sparse')}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-violet-700 bg-violet-900/30 px-3 py-1.5 text-xs font-medium text-violet-300 transition-colors hover:bg-violet-800/50 hover:text-violet-200"
+                    >
+                      <Waves className="size-3.5" />
+                      Sparse Vectors
+                    </button>
+                  )}
+                  {c.metadata.index_config.metadata && (
+                    <button
+                      onClick={() => setVizModal('metadata')}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-700 bg-emerald-900/30 px-3 py-1.5 text-xs font-medium text-emerald-300 transition-colors hover:bg-emerald-800/50 hover:text-emerald-200"
+                    >
+                      <Table className="size-3.5" />
+                      Metadata
+                    </button>
+                  )}
+                  {c.metadata.index_config.memory && (
+                    <button
+                      onClick={() => setVizModal('memory')}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-amber-700 bg-amber-900/30 px-3 py-1.5 text-xs font-medium text-amber-300 transition-colors hover:bg-amber-800/50 hover:text-amber-200"
+                    >
+                      <MemoryStick className="size-3.5" />
+                      Memory
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </Card>
@@ -473,6 +575,36 @@ export function CollectionDetailPage() {
           </ul>
         )}
       </Card>
+
+      {/* ── Index Visualization Floating Modal ── */}
+      <FloatingModal isOpen={Boolean(vizModal)} onClose={handleCloseViz} title={vizTitle}>
+        {vizQuery.isLoading && (
+          <div className="flex justify-center py-16">
+            <Spinner />
+          </div>
+        )}
+        {vizQuery.isError && (
+          <div className="py-8 text-center">
+            <p className="text-red-400">Failed to load visualization data</p>
+            <p className="mt-1 text-sm text-slate-500">{(vizQuery.error as Error)?.message}</p>
+          </div>
+        )}
+        {vizQuery.data?.kind === 'graph' && (
+          <GraphVisualization data={vizQuery.data.data as any} />
+        )}
+        {vizQuery.data?.kind === 'vector' && (
+          <VectorVisualization data={vizQuery.data.data as any} />
+        )}
+        {vizQuery.data?.kind === 'sparse' && (
+          <SparseVisualization data={vizQuery.data.data as any} />
+        )}
+        {vizQuery.data?.kind === 'metadata' && (
+          <MetadataVisualization data={vizQuery.data.data as any} />
+        )}
+        {vizQuery.data?.kind === 'memory' && (
+          <MemoryVisualization data={vizQuery.data.data as any} />
+        )}
+      </FloatingModal>
     </div>
   )
 }

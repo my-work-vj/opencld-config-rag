@@ -11,8 +11,8 @@ from rag_shared.db import engine, SessionLocal, Base, init_pipeline_tables  # no
 
 __all__ = ["engine", "SessionLocal", "Base", "init_pipeline_tables"]
 
-
 def init_db():
     init_pipeline_tables()
-    from core.models import DocumentRecord  # noqa: F401
+    from rag_shared.models import DocumentRecord  # noqa: F401
     Base.metadata.create_all(bind=engine)
+

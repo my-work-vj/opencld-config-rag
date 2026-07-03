@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { EmptyState, Spinner } from '@/components/ui/Feedback'
 import RagStagesEditor, { resolveStageMaps, type IngestionMode } from '@/components/RagStagesEditor'
-import {
+import { 
   DEFAULT_EMBEDDING_MODEL,
   DEFAULT_INGESTION_STAGES,
 } from '@/lib/stage-defaults'
@@ -25,6 +25,12 @@ export function CollectionsPage() {
   const [stageStrategies, setStageStrategies] = useState<Record<string, string>>({})
   const [stageConfigs, setStageConfigs] = useState<Record<string, string>>({})
   const [ingestionMode, setIngestionMode] = useState<IngestionMode>('document_plain')
+  // NEW: Index configuration state
+  const [enableVectorIndex, setEnableVectorIndex] = useState(true)
+  const [enableSparseIndex, setEnableSparseIndex] = useState(false)
+  const [enableGraphIndex, setEnableGraphIndex] = useState(false)
+  const [enableMetadataIndex, setEnableMetadataIndex] = useState(true)
+  const [enableMemoryIndex, setEnableMemoryIndex] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const collections = useQuery({
@@ -70,6 +76,12 @@ export function CollectionsPage() {
       setStageStrategies({})
       setStageConfigs({})
       setIngestionMode('document_plain')
+      // Reset index config
+      setEnableVectorIndex(true)
+      setEnableSparseIndex(false)
+      setEnableGraphIndex(false)
+      setEnableMetadataIndex(true)
+      setEnableMemoryIndex(false)
       setError(null)
     },
     onError: (err) => {
@@ -103,6 +115,16 @@ export function CollectionsPage() {
       stages: Object.fromEntries(
         Object.entries(resolvedStages.ingestion).map(([s, cfg]) => [s, cfg]),
       ),
+      // NEW: Include index configuration in the metadata
+      metadata: {
+        index_config: {
+          vector: enableVectorIndex,
+          sparse: enableSparseIndex,
+          graph: enableGraphIndex,
+          metadata: enableMetadataIndex,
+          memory: enableMemoryIndex,
+        },
+      },
     })
   }
 
@@ -123,7 +145,7 @@ export function CollectionsPage() {
           <h1 className="text-2xl font-bold tracking-tight text-white">Collections</h1>
           <p className="mt-1 max-w-2xl text-sm text-slate-400">
             Configure ingestion stages, link data sources, and build a monitored Qdrant
-            collection end to end.
+            collection end to end. Now with configurable index types for flexible RAG strategies.
           </p>
         </div>
         <Button onClick={() => setShowForm(!showForm)} variant="secondary">
@@ -139,7 +161,7 @@ export function CollectionsPage() {
             <CardDescription>
               Link one or more data sources and choose your embedding model and document source
               type. The ingestion pipeline handles chunking, embedding, and indexing automatically
-              via LiteLLM.
+              via LiteLLM. Configure which index types to enable for this collection.
             </CardDescription>
           </CardHeader>
           <form onSubmit={handleCreate} className="space-y-6">
@@ -191,6 +213,68 @@ export function CollectionsPage() {
                 onChange={(e) => setDescription(e.target.value)}
                 rows={2}
               />
+            </div>
+
+            {/* NEW: Index Configuration Section */}
+            <div className="border-t pt-4">
+              <Label className="font-medium text-slate-300">Index Configuration</Label>
+              <div className="grid gap-4 sm:grid-cols-3 mt-2">
+                <div className="flex items-center space-x-2">
+                  <input
+                    type="checkbox"
+                    id="enable-vector"
+                    checked={enableVectorIndex}
+                    onChange={(e) => setEnableVectorIndex(e.target.checked)}
+                    className="rounded border-slate-600 bg-slate-800 text-indigo-500"
+                  />
+                  <span className="text-sm font-medium">Vector (Qdrant)</span>
+                  <span className="text-xs text-slate-500">Dense embeddings</span>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <input
+                    type="checkbox"
+                    id="enable-sparse"
+                    checked={enableSparseIndex}
+                    onChange={(e) => setEnableSparseIndex(e.target.checked)}
+                    className="rounded border-slate-600 bg-slate-800 text-indigo-500"
+                  />
+                  <span className="text-sm font-medium">Sparse (BM25)</span>
+                  <span className="text-xs text-slate-500">Keyword matching</span>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <input
+                    type="checkbox"
+                    id="enable-graph"
+                    checked={enableGraphIndex}
+                    onChange={(e) => setEnableGraphIndex(e.target.checked)}
+                    className="rounded border-slate-600 bg-slate-800 text-indigo-500"
+                  />
+                  <span className="text-sm font-medium">Graph (Neo4j)</span>
+                  <span className="text-xs text-slate-500">Entity relationships</span>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <input
+                    type="checkbox"
+                    id="enable-metadata"
+                    checked={enableMetadataIndex}
+                    onChange={(e) => setEnableMetadataIndex(e.target.checked)}
+                    className="rounded border-slate-600 bg-slate-800 text-indigo-500"
+                  />
+                  <span className="text-sm font-medium">Metadata (PostgreSQL)</span>
+                  <span className="text-xs text-slate-500">Document/chunk metadata</span>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <input
+                    type="checkbox"
+                    id="enable-memory"
+                    checked={enableMemoryIndex}
+                    onChange={(e) => setEnableMemoryIndex(e.target.checked)}
+                    className="rounded border-slate-600 bg-slate-800 text-indigo-500"
+                  />
+                  <span className="text-sm font-medium">Memory (Redis)</span>
+                  <span className="text-xs text-slate-500">Session context</span>
+                </div>
+              </div>
             </div>
 
             <RagStagesEditor
@@ -251,6 +335,16 @@ function CollectionCard({ collection }: { collection: KnowledgeSource }) {
         <Badge variant="outline">{collection.chunk_count} chunks</Badge>
         {collection.monitor_enabled && (
           <Badge variant="outline">monitored</Badge>
+        )}
+        {/* NEW: Show index configuration badge */}
+        {collection.metadata?.index_config && (
+          <>
+            {collection.metadata.index_config.vector && <Badge variant="outline" className="mr-1">Vector</Badge>}
+            {collection.metadata.index_config.sparse && <Badge variant="outline" className="mr-1" style={{ backgroundColor: '#8b5cf6' }}>Sparse</Badge>}
+            {collection.metadata.index_config.graph && <Badge variant="outline" className="mr-1" style={{ backgroundColor: '#06b6d4' }}>Graph</Badge>}
+            {collection.metadata.index_config.metadata && <Badge variant="outline" className="mr-1">Meta</Badge>}
+            {collection.metadata.index_config.memory && <Badge variant="outline" className="mr-1" style={{ backgroundColor: '#f59e0b' }}>Memory</Badge>}
+          </>
         )}
       </div>
       <div className="mt-4">

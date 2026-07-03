@@ -1,6 +1,6 @@
 """Stage ownership constants for the two-service split."""
 
-INGESTION_STAGES = ("ingestion", "chunking", "embedding", "indexing")
+INGESTION_STAGES = ("ingestion", "chunking", "embedding", "sparse_embedding", "indexing")
 
 QUERY_STAGES = ("knowledge_store", "retrieval", "reranking", "response")
 

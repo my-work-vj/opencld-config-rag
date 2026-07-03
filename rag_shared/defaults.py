@@ -19,21 +19,55 @@ DEFAULT_LLM_PARAMS: dict[str, Any] = {
 DEFAULT_INGESTION_STAGES: dict[str, dict[str, Any]] = {
     "ingestion": {"strategy": "kreuzberg_ingestion", "config": {}},
     "chunking": {
-        "strategy": "recursive_chunking",
+        "strategy": "multigranularity",
         "config": {"chunk_size": 512, "chunk_overlap": 50},
     },
     "embedding": {
         "strategy": "litellm_embedding",
         "config": {"model": DEFAULT_EMBEDDING_MODEL},
     },
+    # Sparse embedding (BM25) — generates sparse vectors for hybrid search
+    "sparse_embedding": {
+        "strategy": "bm25_sparse",
+        "config": {},
+    },
+    # Multi-index routing — each named indexer is dispatched independently
     "indexing": {
-        "strategy": "qdrant_indexing",
-        "config": {
-            "collection_name": "rag_documents",
-            "vector_size": DEFAULT_VECTOR_SIZE,
-            "distance": "Cosine",
-            "recreate": False,
-            "model": DEFAULT_EMBEDDING_MODEL,
+        "qdrant_dense": {
+            "strategy": "qdrant_indexing",
+            "config": {
+                "collection_name": "rag_documents",
+                "vector_size": DEFAULT_VECTOR_SIZE,
+                "distance": "Cosine",
+                "recreate": False,
+                "model": DEFAULT_EMBEDDING_MODEL,
+            },
+        },
+        "qdrant_sparse": {
+            "strategy": "qdrant_sparse_indexing",
+            "config": {
+                "collection_name": "rag_documents",
+                "recreate": False,
+            },
+        },
+        "metadata": {
+            "strategy": "metadata_indexing",
+            "config": {
+                "collection_name": "rag_documents",
+                "pipeline_name": "default",
+            },
+        },
+        "neo4j_graph": {
+            "strategy": "neo4j_graph",
+            "config": {
+                "collection_name": "rag_documents",
+            },
+        },
+        "memory_indexing": {
+            "strategy": "memory_indexing",
+            "config": {
+                "collection_name": "rag_documents",
+            },
         },
     },
 }
@@ -73,10 +107,21 @@ DEFAULT_QUERY_STAGES: dict[str, dict[str, Any]] = {
 
 
 def clone_stage_map(stages: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
-    return {
-        name: {
-            "strategy": cfg.get("strategy", ""),
-            "config": dict(cfg.get("config") or {}),
-        }
-        for name, cfg in stages.items()
-    }
+    result = {}
+    for name, cfg in stages.items():
+        if name == "indexing" and "strategy" not in cfg:
+            # Multi-index format — deep clone each sub-index
+            result[name] = {
+                idx_name: {
+                    "strategy": idx_cfg.get("strategy", ""),
+                    "config": dict(idx_cfg.get("config") or {}),
+                }
+                for idx_name, idx_cfg in cfg.items()
+                if isinstance(idx_cfg, dict)
+            }
+        else:
+            result[name] = {
+                "strategy": cfg.get("strategy", ""),
+                "config": dict(cfg.get("config") or {}),
+            }
+    return result

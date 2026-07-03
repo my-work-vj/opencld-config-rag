@@ -6,8 +6,8 @@ import logging
 import os
 from pathlib import Path
 
-from connectors.pathway.container import container_to_host_path, copy_files_from_container
 from connectors import ConnectorRegistry
+from connectors.pathway.container import container_to_host_path, copy_files_from_container
 from connectors.registry import ConnectorNotFoundError
 from rag_shared.connector_file_repo import ConnectorFileRepo
 from rag_shared.connector_repo import DataConnectorNotFoundError, DataConnectorRepo
@@ -224,3 +224,4 @@ def upload_connector_files(connector_id: str, uploads: list[tuple[str, bytes]]) 
         finally:
             db.close()
         raise
+from connectors.pathway import ensure_container_running
