@@ -218,6 +218,10 @@ class UpdateCollectionRequest(BaseModel):
         None,
         description="knowledge_store, retrieval, reranking, response stage configs",
     )
+    metadata: Optional[dict[str, Any]] = Field(
+        None,
+        description="Extra metadata (e.g., index_config)",
+    )
 
 
 class CollectionIngestFromConnectorRequest(BaseModel):

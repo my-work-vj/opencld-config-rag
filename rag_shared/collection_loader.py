@@ -15,6 +15,7 @@ from rag_shared.defaults import (
     DEFAULT_RERANKER_MODEL,
     clone_stage_map,
 )
+from rag_shared.index_config import apply_index_config_to_stages
 from rag_shared.knowledge_repo import KnowledgeSourceNotFoundError, KnowledgeSourceRepo
 from rag_shared.loader import _apply_model_aliases, _sync_collection_name
 
@@ -98,46 +99,13 @@ def _ingestion_stages_for_record(record) -> dict[str, Any]:
             reranker_model=meta.get("reranker_model") or DEFAULT_RERANKER_MODEL,
             allowed=INGESTION_STAGES,
         )
-    # Filter indexing stages to only those enabled in index_config
-    _filter_indexing_by_config(stages, meta.get("index_config", {}), record.collection_name)
+    # Apply index_config: filter indexers and enable sparse_embedding when needed
+    stages = apply_index_config_to_stages(
+        stages,
+        meta.get("index_config"),
+        collection_name=record.collection_name,
+    )
     return stages
-
-
-# Mapping from index_config flag → indexing stage key name
-_INDEX_CONFIG_MAP: dict[str, str] = {
-    "vector": "qdrant_dense",
-    "sparse": "qdrant_sparse",
-    "graph": "neo4j_graph",
-    "metadata": "metadata",
-    "memory": "memory_indexing",
-}
-
-
-def _filter_indexing_by_config(
-    stages: dict[str, Any],
-    index_config: dict[str, Any],
-    collection_name: str,
-) -> None:
-    """Remove indexing strategies that are not enabled in index_config."""
-    indexing = stages.get("indexing")
-    if not isinstance(indexing, dict):
-        return
-    if not index_config:
-        # No config means all indexes should run (backward compat)
-        return
-    allowed: set[str] = set()
-    for flag, idx_key in _INDEX_CONFIG_MAP.items():
-        if index_config.get(flag, False):
-            allowed.add(idx_key)
-    # Add memory_indexing if it's not already in the defaults but is enabled
-    if index_config.get("memory") and "memory_indexing" not in indexing:
-        indexing["memory_indexing"] = {
-            "strategy": "memory_indexing",
-            "config": {"collection_name": collection_name},
-        }
-    # Filter: keep only enabled index stages
-    stages["indexing"] = {k: v for k, v in indexing.items() if k in allowed}
-
 
 
 def _query_stages_for_record(record) -> dict[str, Any]:

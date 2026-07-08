@@ -253,6 +253,14 @@ export type IndexConfig = {
 
 // ── Knowledge Source ──
 
+export type IndexConfig = {
+  vector: boolean
+  sparse: boolean
+  graph: boolean
+  metadata: boolean
+  memory: boolean
+}
+
 export type KnowledgeSource = {
   id: string
   name: string
@@ -271,13 +279,8 @@ export type KnowledgeSource = {
   chat_model?: string
   reranker_model?: string
   metadata?: {
-    index_config?: {
-      vector?: boolean
-      sparse?: boolean
-      graph?: boolean
-      metadata?: boolean
-      memory?: boolean
-    }
+    index_config?: IndexConfig
+    ingestion_mode?: 'document_plain' | 'document_vision' | 'websites'
   }
   created_at?: string | null
 }
@@ -299,6 +302,10 @@ export type CreateCollectionRequest = {
   data_connector_ids?: string[]
   stages?: Record<string, StageConfig>
   query_stages?: Record<string, StageConfig>
+  metadata?: {
+    index_config?: IndexConfig
+    ingestion_mode?: 'document_plain' | 'document_vision' | 'websites'
+  }
 }
 
 export type UpdateCollectionRequest = {
@@ -309,6 +316,10 @@ export type UpdateCollectionRequest = {
   reranker_model?: string
   stages?: Record<string, StageConfig>
   query_stages?: Record<string, StageConfig>
+  metadata?: {
+    index_config?: IndexConfig
+    ingestion_mode?: 'document_plain' | 'document_vision' | 'websites'
+  }
 }
 
 export type KnowledgeSourceListResponse = {

@@ -102,6 +102,7 @@ class IngestionPipeline:
                     chunks: list[Chunk] = None,
                     session_id: str = None,
                     context: dict = None,
+                    content_hash: str | None = None,
                     **overrides) -> None:
         """Run all configured indexing stages."""
         if sparse_vectors is None:
@@ -139,13 +140,38 @@ class IngestionPipeline:
                     strategy.index_sparse(sparse_vectors, **strategy_kwargs)
                 elif hasattr(strategy, 'index_graph') and (graph_entities or graph_relations) and 'graph' in strategy_name.lower():
                     logger.info(f"[{self.name}] {index_name} (Graph): {type(strategy).__name__}")
-                    strategy.index_graph(graph_entities, graph_relations, **strategy_kwargs)
+                    graph_kwargs = dict(strategy_kwargs)
+                    if documents:
+                        graph_kwargs["documents"] = documents
+                    if chunks:
+                        graph_kwargs["chunks"] = chunks
+                    strategy.index_graph(graph_entities, graph_relations, **graph_kwargs)
                 elif hasattr(strategy, 'index_metadata') and (documents or chunks) and 'metadata' in strategy_name.lower():
                     logger.info(f"[{self.name}] {index_name} (Metadata): {type(strategy).__name__}")
-                    strategy.index_metadata(documents, chunks, **strategy_kwargs)
-                elif hasattr(strategy, 'index_memory') and session_id and 'memory' in strategy_name.lower():
+                    meta_kwargs = dict(strategy_kwargs)
+                    if content_hash:
+                        meta_kwargs["content_hash"] = content_hash
+                    strategy.index_metadata(documents, chunks, **meta_kwargs)
+                elif hasattr(strategy, 'index_memory') and 'memory' in strategy_name.lower():
                     logger.info(f"[{self.name}] {index_name} (Memory): {type(strategy).__name__}")
-                    strategy.index_memory(session_id, context, **strategy_kwargs)
+                    mem_kwargs = dict(strategy_kwargs)
+                    if content_hash:
+                        mem_kwargs["content_hash"] = content_hash
+                    if context:
+                        mem_kwargs.update({
+                            k: context[k]
+                            for k in ("connector_id", "external_id", "filename")
+                            if k in context
+                        })
+                    if documents or chunks:
+                        catalog_kwargs = dict(mem_kwargs)
+                        strategy.index_document_catalog(
+                            documents or [],
+                            chunks or [],
+                            **catalog_kwargs,
+                        )
+                    if session_id:
+                        strategy.index_memory(session_id, context or {}, **mem_kwargs)
                 elif hasattr(strategy, 'index'):
                     logger.info(f"[{self.name}] {index_name} (Dense): {type(strategy).__name__}")
                     strategy.index(embeddings, **strategy_kwargs)
@@ -156,6 +182,33 @@ class IngestionPipeline:
                 logger.error(f"Failed to run indexer {index_name} ({strategy_name}): {e}")
                 # Continue with other indexers rather than failing completely
 
+    def _graph_index_enabled(self) -> bool:
+        indexing = self.stages_config.get("indexing", {})
+        if not isinstance(indexing, dict):
+            return False
+        if "strategy" in indexing:
+            name = indexing.get("strategy", "")
+            return "graph" in name.lower() or "neo4j" in name.lower()
+        return any(
+            isinstance(cfg, dict)
+            and (
+                "graph" in k.lower()
+                or "neo4j" in (cfg.get("strategy") or "").lower()
+            )
+            for k, cfg in indexing.items()
+        )
+
+    def _memory_index_enabled(self) -> bool:
+        indexing = self.stages_config.get("indexing", {})
+        if not isinstance(indexing, dict):
+            return False
+        if "strategy" in indexing:
+            return "memory" in (indexing.get("strategy") or "").lower()
+        return any(
+            "memory" in k.lower()
+            for k in indexing
+        )
+
     def run(
         self,
         source: Any,
@@ -164,6 +217,8 @@ class IngestionPipeline:
         embedding_overrides: dict | None = None,
         sparse_embedding_overrides: dict | None = None,
         indexing_overrides: dict | None = None,
+        source_metadata: dict | None = None,
+        content_hash: str | None = None,
     ) -> PipelineContext:
         """Run the full ingestion pipeline with multi-index support."""
         ctx = PipelineContext(pipeline_name=self.name, config=self.config)
@@ -174,6 +229,14 @@ class IngestionPipeline:
         ctx.documents = self.run_ingestion(source, **(ingestion_overrides or {}))
         timings["ingestion"] = time.time() - t0
         logger.info(f"Ingested {len(ctx.documents)} documents")
+
+        if source_metadata:
+            for doc in ctx.documents:
+                doc.metadata.update(source_metadata)
+                if source_metadata.get("filename"):
+                    doc.filename = source_metadata["filename"]
+                if content_hash:
+                    doc.metadata["content_hash"] = content_hash
 
         # 2. Chunking
         t0 = time.time()
@@ -194,16 +257,30 @@ class IngestionPipeline:
         if ctx.sparse_vectors:
             logger.info(f"Generated {len(ctx.sparse_vectors)} sparse vectors")
 
-        # 5. Graph Entity/Relation Extraction (would typically happen during embedding or as separate stage)
-        # For now, we'll extract simple entities from chunks - in practice this would use NER
+        # 5. Graph Entity/Relation Extraction (when graph index enabled)
         t0 = time.time()
-        ctx.graph_entities, ctx.graph_relations = self._extract_entities_and_relations(ctx.chunks)
+        if self._graph_index_enabled():
+            ctx.graph_entities, ctx.graph_relations = self._extract_entities_and_relations(
+                ctx.chunks,
+                source_metadata=source_metadata or {},
+            )
+            if ctx.graph_entities or ctx.graph_relations:
+                logger.info(
+                    f"Extracted {len(ctx.graph_entities)} entities and "
+                    f"{len(ctx.graph_relations)} relations"
+                )
+        else:
+            ctx.graph_entities, ctx.graph_relations = [], []
         timings["graph_extraction"] = time.time() - t0
-        if ctx.graph_entities or ctx.graph_relations:
-            logger.info(f"Extracted {len(ctx.graph_entities)} entities and {len(ctx.graph_relations)} relations")
 
         # 6. Multi-Index Storage
         t0 = time.time()
+        memory_session = None
+        if source_metadata and self._memory_index_enabled():
+            memory_session = (
+                f"{source_metadata.get('connector_id', '')}:"
+                f"{source_metadata.get('external_id', '')}"
+            )
         self.run_indexing(
             embeddings=ctx.embeddings,
             sparse_vectors=ctx.sparse_vectors,
@@ -211,9 +288,14 @@ class IngestionPipeline:
             graph_relations=ctx.graph_relations,
             documents=ctx.documents,
             chunks=ctx.chunks,
-            session_id=self.config.get("session_id"),
-            context=self.config.get("context", {}),
-            **(indexing_overrides or {})
+            session_id=memory_session,
+            context={
+                "documents": ctx.documents,
+                "chunks": ctx.chunks,
+                **(source_metadata or {}),
+            },
+            content_hash=content_hash,
+            **(indexing_overrides or {}),
         )
         timings["indexing"] = time.time() - t0
         logger.info("Multi-index storage complete")
@@ -229,7 +311,12 @@ class IngestionPipeline:
 
         return ctx
 
-    def _extract_entities_and_relations(self, chunks: list[Chunk]) -> tuple[list[GraphEntity], list[GraphRelation]]:
+    def _extract_entities_and_relations(
+        self,
+        chunks: list[Chunk],
+        *,
+        source_metadata: dict | None = None,
+    ) -> tuple[list[GraphEntity], list[GraphRelation]]:
         """Extract entities and relations from chunks for knowledge graph.
         
         This is a simplified implementation. In production, you would use:
@@ -250,6 +337,11 @@ class IngestionPipeline:
         # Track entity mentions to avoid duplicates
         entity_map = {}  # normalized_name -> entity_id
         
+        source_metadata = source_metadata or {}
+        collection_name = source_metadata.get("qdrant_collection", "")
+        connector_id = source_metadata.get("connector_id", "")
+        external_id = source_metadata.get("external_id", "")
+
         for chunk in chunks:
             text = chunk.content
             
@@ -292,9 +384,12 @@ class IngestionPipeline:
                         properties={
                             "source_chunk": chunk.id,
                             "source_document": chunk.document_id,
+                            "collection_name": collection_name,
+                            "connector_id": connector_id,
+                            "external_id": external_id,
                             "mention_count": 1,
-                            "first_seen": chunk.content[:100]  # Preview
-                        }
+                            "first_seen": chunk.content[:100],
+                        },
                     )
                     entities.append(entity)
                     entity_map[normalized_name] = entity_id

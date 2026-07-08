@@ -85,6 +85,9 @@ class QdrantSparseIndexing(BaseSparseIndexingStrategy):
                 "chunk_level": sv.chunk.chunk_level,
                 "filename": sv.chunk.filename or "",
             }
+            for key in ("connector_id", "external_id", "connector_file_id", "qdrant_collection"):
+                if key in sv.chunk.metadata:
+                    payload[key] = sv.chunk.metadata[key]
 
             points.append(PointStruct(
                 id=sv.chunk.id,

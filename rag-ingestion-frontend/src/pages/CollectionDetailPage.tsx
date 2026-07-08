@@ -10,6 +10,8 @@ import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { Spinner } from '@/components/ui/Feedback'
 import RagStagesEditor, { resolveStageMaps, type IngestionMode } from '@/components/RagStagesEditor'
+import { IndexConfigEditor, IndexConfigBadges, normalizeIndexConfig } from '@/components/IndexConfigEditor'
+import type { IndexConfig } from '@/types/api'
 import {
   DEFAULT_EMBEDDING_MODEL,
   DEFAULT_INGESTION_STAGES,
@@ -40,6 +42,7 @@ export function CollectionDetailPage() {
   const [stageStrategies, setStageStrategies] = useState<Record<string, string>>({})
   const [stageConfigs, setStageConfigs] = useState<Record<string, string>>({})
   const [ingestionMode, setIngestionMode] = useState<IngestionMode>('document_plain')
+  const [indexConfig, setIndexConfig] = useState<IndexConfig>(normalizeIndexConfig(null))
   const [vizModal, setVizModal] = useState<string | null>(null)
   const [vizError, setVizError] = useState<string | null>(null)
 
@@ -157,7 +160,14 @@ export function CollectionDetailPage() {
     }
     setStageStrategies(strategiesMap)
     setStageConfigs(configsMap)
-  }, [c?.name, c?.embedding_model])
+    setIndexConfig(normalizeIndexConfig(c.metadata?.index_config))
+    const mode = c.metadata?.ingestion_mode
+    if (mode === 'document_vision' || mode === 'document_plain' || mode === 'websites') {
+      setIngestionMode(mode)
+    } else {
+      setIngestionMode('document_plain')
+    }
+  }, [c?.name, c?.embedding_model, c?.metadata?.index_config, c?.metadata?.ingestion_mode])
 
   const resolvedStages = useMemo(
     () =>
@@ -252,6 +262,10 @@ export function CollectionDetailPage() {
       stages: Object.fromEntries(
         Object.entries(resolvedStages.ingestion).map(([s, cfg]) => [s, cfg]),
       ),
+      metadata: {
+        index_config: indexConfig,
+        ingestion_mode: ingestionMode,
+      },
     })
   }
 
@@ -313,8 +327,8 @@ export function CollectionDetailPage() {
                 Ingestion stage configuration
               </CardTitle>
               <CardDescription>
-                Configure the document source type and chunking strategy. Embedding is handled
-                automatically via LiteLLM.
+                Configure chunking, embedding model, and which index types are active.
+                Changing indexes re-syncs linked files automatically.
               </CardDescription>
             </div>
             <Button
@@ -328,6 +342,7 @@ export function CollectionDetailPage() {
         </CardHeader>
         {editingStages ? (
           <div className="space-y-6">
+            <IndexConfigEditor value={indexConfig} onChange={setIndexConfig} />
             <RagStagesEditor
               baseStages={ingestionStages}
               stageStrategies={stageStrategies}
@@ -350,6 +365,9 @@ export function CollectionDetailPage() {
           </div>
         ) : (
           <div className="space-y-4">
+            <div className="flex flex-wrap gap-2">
+              <IndexConfigBadges config={c.metadata?.index_config} />
+            </div>
             <div className="flex flex-wrap gap-2">
               {Object.entries(ingestionStages).map(([stage, cfg]) => (
                 <Badge key={`ing-${stage}`} variant="outline">

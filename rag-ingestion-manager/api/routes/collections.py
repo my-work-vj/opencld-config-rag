@@ -36,11 +36,12 @@ from rag_shared.defaults import (
     INLINE_PIPELINE_ID,
     clone_stage_map,
 )
+from rag_shared.index_config import apply_index_config_to_stages, normalize_index_config
 from rag_shared.constants import INGESTION_STAGES, QUERY_STAGES
 
 from connectors.google_drive import source_type_for_path
 from connectors.pathway.container import container_to_host_path
-from monitoring.qdrant_ops import delete_connector_file_vectors, ensure_qdrant_collection
+from monitoring.index_ops import delete_document_from_all_indexes, ensure_collection_indexes
 from services.collection_sync_service import sync_collection, _run_connector_file_ingest, file_content_hash
 
 router = APIRouter()
@@ -88,28 +89,36 @@ def _collection_info(record: KnowledgeSource, db) -> KnowledgeSourceInfo:
     )
 
 
-def _build_ingestion_stages(req: CreateCollectionRequest, collection_name: str) -> dict:
+def _build_ingestion_stages(
+    req: CreateCollectionRequest,
+    collection_name: str,
+    index_config: dict | None = None,
+) -> dict:
     stages = clone_stage_map(DEFAULT_INGESTION_STAGES)
     for stage_name, cfg in _stage_dict_from_request(req.stages or {}).items():
         if stage_name in INGESTION_STAGES:
             stages[stage_name] = cfg
     stages["embedding"]["config"]["model"] = req.embedding_model
 
-    # Handle both single-index and multi-index indexing stage config
     indexing = stages.get("indexing", {})
     if "strategy" in indexing:
-        # Single-index format
         indexing["config"]["collection_name"] = collection_name
         indexing["config"]["vector_size"] = req.vector_size
         indexing["config"]["model"] = req.embedding_model
     else:
-        # Multi-index format — inject into each sub-index
         for idx_name, idx_cfg in indexing.items():
             if isinstance(idx_cfg, dict):
                 idx_cfg.setdefault("config", {})
                 idx_cfg["config"]["collection_name"] = collection_name
                 idx_cfg["config"]["vector_size"] = req.vector_size
                 idx_cfg["config"]["model"] = req.embedding_model
+
+    if index_config:
+        stages = apply_index_config_to_stages(
+            stages,
+            index_config,
+            collection_name=collection_name,
+        )
     return stages
 
 
@@ -226,7 +235,8 @@ async def create_collection(req: CreateCollectionRequest):
             DataConnectorRepo.get(db, connector_id)
 
         collection_name = req.collection_name or slugify_name(req.name)
-        ingestion_stages = _build_ingestion_stages(req, collection_name)
+        index_config = (req.metadata or {}).get("index_config") if req.metadata else None
+        ingestion_stages = _build_ingestion_stages(req, collection_name, index_config)
         query_stages = _build_query_stages(req, collection_name)
         meta = {
             "data_connector_id": connector_ids[0],
@@ -239,9 +249,10 @@ async def create_collection(req: CreateCollectionRequest):
             "vector_size": req.vector_size,
             "monitor_enabled": True,
         }
-        # Merge any extra metadata (e.g., index_config) from the request
         if req.metadata:
             meta.update(req.metadata)
+        if index_config:
+            meta["index_config"] = index_config
 
         record = KnowledgeSource(
             name=req.name,
@@ -262,9 +273,14 @@ async def create_collection(req: CreateCollectionRequest):
         CollectionConnectorRepo.link_many(db, req.name, connector_ids)
 
         try:
-            ensure_qdrant_collection(collection_name, vector_size=req.vector_size)
+            index_status = ensure_collection_indexes(
+                collection_name,
+                vector_size=req.vector_size,
+                index_config=meta.get("index_config"),
+            )
+            logger.info("Index provisioning for '%s': %s", collection_name, index_status)
         except Exception as exc:
-            logger.warning("Could not pre-create Qdrant collection '%s': %s", collection_name, exc)
+            logger.warning("Could not provision indexes for '%s': %s", collection_name, exc)
 
         info = _collection_info(record, db)
     except DataConnectorNotFoundError as exc:
@@ -279,6 +295,7 @@ async def create_collection(req: CreateCollectionRequest):
 @router.patch("/collections/{name}", response_model=KnowledgeSourceInfo)
 async def update_collection(name: str, req: UpdateCollectionRequest):
     db = SharedSession()
+    should_resync = False
     try:
         record = KnowledgeSourceRepo.get(db, name)
         meta = dict(record.metadata_json or {})
@@ -331,14 +348,65 @@ async def update_collection(name: str, req: UpdateCollectionRequest):
                 current["reranking"]["config"]["model"] = reranker_model
             meta["query_stages"] = current
 
+        if req.metadata is not None:
+            old_index_config = normalize_index_config(meta.get("index_config"))
+            old_ingestion_mode = meta.get("ingestion_mode", "document_plain")
+            meta.update(req.metadata)
+            if "ingestion_mode" in req.metadata:
+                new_ingestion_mode = req.metadata.get("ingestion_mode", "document_plain")
+                if new_ingestion_mode != old_ingestion_mode:
+                    indexed = IndexedDocumentRepo.list_for_collection(db, name)
+                    for doc in indexed:
+                        doc.content_hash = ""
+                        doc.chunk_count = 0
+                    db.commit()
+                    should_resync = True
+            if "index_config" in req.metadata:
+                new_index_config = normalize_index_config(req.metadata["index_config"])
+                current_stages = meta.get("ingestion_stages") or clone_stage_map(DEFAULT_INGESTION_STAGES)
+                meta["ingestion_stages"] = apply_index_config_to_stages(
+                    current_stages,
+                    req.metadata["index_config"],
+                    collection_name=record.collection_name,
+                )
+                meta["index_config"] = new_index_config
+                try:
+                    index_status = ensure_collection_indexes(
+                        record.collection_name,
+                        vector_size=record.vector_size or 2048,
+                        index_config=new_index_config,
+                    )
+                    logger.info(
+                        "Index provisioning for '%s' after config update: %s",
+                        record.collection_name,
+                        index_status,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "Could not provision indexes for '%s': %s",
+                        record.collection_name,
+                        exc,
+                    )
+                if old_index_config != new_index_config:
+                    indexed = IndexedDocumentRepo.list_for_collection(db, name)
+                    for doc in indexed:
+                        doc.content_hash = ""
+                        doc.chunk_count = 0
+                    db.commit()
+                    should_resync = True
+
         record.metadata_json = meta
         db.commit()
         db.refresh(record)
-        return _collection_info(record, db)
+        info = _collection_info(record, db)
     except KnowledgeSourceNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     finally:
         db.close()
+
+    if should_resync:
+        _trigger_background_sync(name)
+    return info
 
 
 @router.post("/collections/{name}/sync")
@@ -355,10 +423,17 @@ async def delete_collection(name: str, delete_collection_vectors: bool = False):
     try:
         record = KnowledgeSourceRepo.get(db, name)
         collection_name = record.collection_name
+        index_config = (record.metadata_json or {}).get("index_config")
         connector_ids = CollectionConnectorRepo.list_connector_ids(db, name)
         indexed = IndexedDocumentRepo.list_for_collection(db, name)
         for doc in indexed:
-            delete_connector_file_vectors(collection_name, doc.connector_id, doc.external_id)
+            delete_document_from_all_indexes(
+                collection_name,
+                name,
+                doc.connector_id,
+                doc.external_id,
+                index_config,
+            )
         IndexedDocumentRepo.delete_for_collection(db, name)
         CollectionConnectorRepo.delete_for_collection(db, name)
         KnowledgeSourceRepo.delete(db, name)
@@ -512,10 +587,16 @@ async def ingest_collection_from_connector(name: str, req: CollectionIngestFromC
             existing = None
             db = SharedSession()
             try:
+                ks = KnowledgeSourceRepo.get(db, name)
+                index_config = (ks.metadata_json or {}).get("index_config")
                 existing = IndexedDocumentRepo.get_by_file_id(db, name, f.id)
                 if existing:
-                    delete_connector_file_vectors(
-                        collection_name, existing.connector_id, existing.external_id
+                    delete_document_from_all_indexes(
+                        collection_name,
+                        name,
+                        existing.connector_id,
+                        existing.external_id,
+                        index_config,
                     )
                     IndexedDocumentRepo.delete(db, existing.id)
             finally:
@@ -576,6 +657,7 @@ def _resolve_qdrant_collection(name: str) -> str:
 @router.get("/collections/{name}/visualize/graph")
 async def visualize_graph(name: str):
     """Return nodes and edges from Neo4j for the given collection."""
+    qname = _resolve_qdrant_collection(name)
     try:
         from neo4j import GraphDatabase
         uri = os.getenv("NEO4J_URI", "bolt://localhost:7687")
@@ -589,7 +671,7 @@ async def visualize_graph(name: str):
         with driver.session() as session:
             result = session.run(
                 "MATCH (n {collection_name: $name}) OPTIONAL MATCH (n)-[r]->(m {collection_name: $name}) RETURN n, r, m",
-                name=name,
+                name=qname,
             )
             node_ids: set[int] = set()
             edge_ids: set[int] = set()
@@ -615,9 +697,9 @@ async def visualize_graph(name: str):
                         edge_ids.add(eid)
                         edges.append({"id": eid, "source": n.get("id", id(n)), "target": m.get("id", id(m)), "type": r.type if hasattr(r, "type") else str(type(r)), "properties": dict(r)})
             if not nodes_map:
-                count_result = session.run("MATCH (n {collection_name: $name}) RETURN count(n) as c", name=name).single()
-                return {"nodes": [], "edges": [], "message": f"No graph data for collection '{name}'", "node_count": count_result["c"] if count_result else 0, "edge_count": 0}
-            return {"nodes": list(nodes_map.values()), "edges": edges, "node_count": len(nodes_map), "edge_count": len(edges)}
+                count_result = session.run("MATCH (n {collection_name: $name}) RETURN count(n) as c", name=qname).single()
+                return {"nodes": [], "edges": [], "message": f"No graph data for collection '{qname}'", "node_count": count_result["c"] if count_result else 0, "edge_count": 0}
+            return {"nodes": list(nodes_map.values()), "edges": edges, "node_count": len(nodes_map), "edge_count": len(edges), "collection_name": qname}
     except Exception as e:
         logger.error(f"Neo4j query failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -649,11 +731,7 @@ async def visualize_vectors(name: str):
         samples = []
         for p in points:
             vec = p.vector
-            vi = {}
-            if isinstance(vec, dict):
-                vi = {k: _short_vec(v) for k, v in vec.items()}
-            elif vec is not None:
-                vi = {"dense": _short_vec(vec)}
+            vi = _preview_vectors(vec)
             samples.append({"id": str(p.id), "vector_dims": vi, "payload": {k: str(v)[:200] for k, v in (p.payload or {}).items()}})
         cfg = info.config if hasattr(info, "config") else {}
         params = {}
@@ -710,6 +788,7 @@ async def visualize_sparse(name: str):
 @router.get("/collections/{name}/visualize/metadata")
 async def visualize_metadata(name: str):
     """Return metadata records from PostgreSQL for the collection."""
+    qname = _resolve_qdrant_collection(name)
     try:
         from sqlalchemy import create_engine, text
         pg_user = os.getenv("POSTGRES_USER", "rag_user")
@@ -722,14 +801,37 @@ async def visualize_metadata(name: str):
         raise HTTPException(status_code=503, detail=f"PostgreSQL unavailable: {e}")
     try:
         with engine.connect() as conn:
-            docs = [dict(r._mapping) for r in conn.execute(text("SELECT id, filename, chunk_count, created_at FROM documents WHERE collection_name = :name ORDER BY created_at DESC LIMIT 20"), {"name": name})]
-            doc_count = conn.execute(text("SELECT COUNT(*) FROM documents WHERE collection_name = :name"), {"name": name}).scalar() or 0
-            chunks = []
-            try:
-                chunks = [dict(r._mapping) for r in conn.execute(text("SELECT chunk_index, token_count FROM chunks WHERE collection_name = :name ORDER BY chunk_index LIMIT 10"), {"name": name})]
-            except Exception:
-                pass
-            return {"available": True, "document_count": doc_count, "chunk_count": len(chunks), "documents": [{k: str(v)[:150] for k, v in d.items()} for d in docs], "sample_chunks": [{k: str(v)[:120] for k, v in c.items()} for c in chunks]}
+            docs = [dict(r._mapping) for r in conn.execute(text("SELECT id, filename, chunk_count, created_at FROM documents WHERE collection_name = :name ORDER BY created_at DESC LIMIT 20"), {"name": qname})]
+            doc_count = conn.execute(text("SELECT COUNT(*) FROM documents WHERE collection_name = :name"), {"name": qname}).scalar() or 0
+            chunk_count = conn.execute(
+                text(
+                    "SELECT COUNT(*) FROM chunks c "
+                    "JOIN documents d ON c.document_id = d.id "
+                    "WHERE d.collection_name = :name"
+                ),
+                {"name": qname},
+            ).scalar() or 0
+            chunks = [
+                dict(r._mapping)
+                for r in conn.execute(
+                    text(
+                        "SELECT c.chunk_index, c.chunk_level, LENGTH(c.content) AS content_length "
+                        "FROM chunks c "
+                        "JOIN documents d ON c.document_id = d.id "
+                        "WHERE d.collection_name = :name "
+                        "ORDER BY c.chunk_index LIMIT 10"
+                    ),
+                    {"name": qname},
+                )
+            ]
+            return {
+                "available": True,
+                "collection_name": qname,
+                "document_count": doc_count,
+                "chunk_count": chunk_count,
+                "documents": [{k: str(v)[:150] for k, v in d.items()} for d in docs],
+                "sample_chunks": [{k: str(v)[:120] for k, v in c.items()} for c in chunks],
+            }
     except Exception as e:
         logger.error(f"PostgreSQL query failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -738,6 +840,7 @@ async def visualize_metadata(name: str):
 @router.get("/collections/{name}/visualize/memory")
 async def visualize_memory(name: str):
     """Return memory store data from Redis for the collection."""
+    qname = _resolve_qdrant_collection(name)
     try:
         import redis as redis_mod
         rh = os.getenv("REDIS_HOST", "localhost")
@@ -750,7 +853,9 @@ async def visualize_memory(name: str):
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"Redis unavailable: {e}")
     try:
-        keys = r.keys(f"*{name}*")
+        doc_keys = r.keys(f"rag:doc:{qname}:*")
+        memory_keys = r.keys(f"rag:memory:{qname}:*")
+        keys = list(dict.fromkeys([*doc_keys, *memory_keys]))
         entries = []
         for k in keys[:50]:
             ks = str(k)
@@ -758,15 +863,43 @@ async def visualize_memory(name: str):
                 entries.append({"key": ks, "value": str(r.get(k))[:200], "type": r.type(ks), "ttl": r.ttl(k)})
             except Exception:
                 pass
-        return {"available": True, "total_keys": len(keys), "entries": entries}
+        return {"available": True, "collection_name": qname, "total_keys": len(keys), "entries": entries}
     except Exception as e:
         logger.error(f"Redis query failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 def _short_vec(v, max_len: int = 10) -> dict:
-    """Convert vector to short preview."""
+    """Convert a dense vector to a short numeric preview."""
     if v is None:
         return {"length": 0, "preview": []}
-    vl = list(v) if hasattr(v, '__iter__') else []
-    return {"length": len(vl), "preview": [round(float(x), 6) for x in vl[:max_len]]}
+    if hasattr(v, "indices") and hasattr(v, "values"):
+        indices = list(v.indices) if hasattr(v.indices, "__iter__") else []
+        return {"type": "sparse", "non_zero": len(indices), "indices_preview": indices[:max_len]}
+    if hasattr(v, "tolist"):
+        v = v.tolist()
+    if isinstance(v, dict):
+        return {k: _short_vec(val, max_len) for k, val in v.items()}
+    if isinstance(v, (list, tuple)):
+        preview = []
+        for x in v[:max_len]:
+            if isinstance(x, (int, float)):
+                preview.append(round(float(x), 6))
+            elif isinstance(x, (list, tuple)) and x:
+                preview.append(round(float(x[0]), 6))
+            else:
+                preview.append(str(x)[:20])
+        return {"length": len(v), "preview": preview}
+    try:
+        return {"length": 1, "preview": [round(float(v), 6)]}
+    except (TypeError, ValueError):
+        return {"length": 0, "preview": [], "raw": str(v)[:80]}
+
+
+def _preview_vectors(vec, max_len: int = 10) -> dict:
+    """Build a visualization-friendly preview for Qdrant point vectors."""
+    if vec is None:
+        return {}
+    if isinstance(vec, dict):
+        return {k: _short_vec(v, max_len) for k, v in vec.items()}
+    return {"dense": _short_vec(vec, max_len)}

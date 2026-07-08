@@ -171,13 +171,19 @@ class Neo4jGraphIndexingStrategy(BaseGraphIndexingStrategy):
             MERGE (e:{self.config.entity_label} {{id: $id}})
             SET e.label = $label,
                 e.name = $name,
+                e.collection_name = $collection_name,
+                e.connector_id = $connector_id,
+                e.external_id = $external_id,
                 e += $properties
             """
             params = {
                 "id": entity.id,
                 "label": entity.label,
                 "name": entity.name,
-                "properties": entity.properties
+                "collection_name": entity.properties.get("collection_name", ""),
+                "connector_id": entity.properties.get("connector_id", ""),
+                "external_id": entity.properties.get("external_id", ""),
+                "properties": entity.properties,
             }
             session.run(query, parameters=params)
     

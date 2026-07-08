@@ -55,6 +55,8 @@ def parse_credentials(credentials_path: str) -> dict[str, Any]:
 
 def source_type_for_path(path: Path) -> str:
     ext = path.suffix.lower()
+    if ext in {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tiff", ".tif", ".svg"}:
+        return "image"
     if ext == ".pdf":
         return "pdf"
     if ext in {".html", ".htm"}:
@@ -73,6 +75,15 @@ def _mime_for_filename(filename: str) -> str:
         ".csv": "text/csv",
         ".doc": "application/msword",
         ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".webp": "image/webp",
+        ".gif": "image/gif",
+        ".bmp": "image/bmp",
+        ".tiff": "image/tiff",
+        ".tif": "image/tiff",
+        ".svg": "image/svg+xml",
     }
     return mime_map.get(ext, "application/octet-stream")
 

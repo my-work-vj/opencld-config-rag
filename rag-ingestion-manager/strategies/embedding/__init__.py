@@ -37,48 +37,99 @@ class LiteLLMClient:
 
 @StrategyRegistry.register("embedding", "litellm_embedding")
 class LiteLLMEmbedding(BaseEmbeddingStrategy):
-    """Generate embeddings via LiteLLM proxy."""
+    """Generate dense embeddings via LiteLLM (text + multimodal image inputs)."""
 
     def __init__(self, **kwargs):
         self.client = LiteLLMClient.get_client().client
         self.model = kwargs.get("model", os.getenv("EMBEDDING_MODEL", "nvidia-embed"))
-        self.dimensions = kwargs.get("dimensions", 2048)
+        self.dimensions = kwargs.get("dimensions")
+        if not self.dimensions:
+            try:
+                from services.litellm_model_info import get_embedding_model_info
+                self.dimensions = get_embedding_model_info(self.model)["output_dimensions"]
+            except Exception:
+                self.dimensions = int(os.getenv("DEFAULT_VECTOR_SIZE", "2048"))
+
+    def _zero_vector(self) -> list[float]:
+        return [0.0] * int(self.dimensions or 2048)
+
+    def _embed_text_batch(
+        self,
+        batch: list[Chunk],
+        model: str,
+        input_type: str,
+    ) -> dict[str, list[float]]:
+        texts = [c.content for c in batch]
+        vectors: dict[str, list[float]] = {}
+        try:
+            resp = self.client.embeddings.create(
+                model=model,
+                input=texts,
+                extra_body={"input_type": input_type, "encoding_format": "float", "modality": "text"},
+            )
+            for chunk, data in zip(batch, resp.data):
+                vectors[chunk.id] = data.embedding
+                if data.embedding:
+                    self.dimensions = len(data.embedding)
+        except Exception as exc:
+            logger.error("Text embedding batch error: %s", exc)
+            for chunk in batch:
+                vectors[chunk.id] = self._zero_vector()
+        return vectors
+
+    def _embed_image_chunk(self, chunk: Chunk, model: str, input_type: str) -> list[float]:
+        from services.modality import path_to_data_url
+
+        image_path = chunk.metadata.get("image_path") or chunk.metadata.get("path")
+        if not image_path:
+            logger.error("Image chunk %s is missing image_path metadata", chunk.id)
+            return self._zero_vector()
+
+        try:
+            data_url = path_to_data_url(image_path)
+            resp = self.client.embeddings.create(
+                model=model,
+                input=[data_url],
+                extra_body={
+                    "input_type": input_type,
+                    "modality": "image",
+                    "encoding_format": "float",
+                },
+            )
+            vector = resp.data[0].embedding
+            if vector:
+                self.dimensions = len(vector)
+            return vector
+        except Exception as exc:
+            logger.error("Image embedding error for %s: %s", image_path, exc)
+            return self._zero_vector()
 
     def embed(self, chunks: List[Chunk], **kwargs) -> List[EmbeddingVector]:
+        if not chunks:
+            return []
+
         model = kwargs.get("model", self.model)
         batch_size = kwargs.get("batch_size", 32)
         input_type = kwargs.get("input_type", "passage")
 
-        all_vectors = []
-        for i in range(0, len(chunks), batch_size):
-            batch = chunks[i:i + batch_size]
-            texts = [c.content for c in batch]
+        vectors_by_id: dict[str, list[float]] = {}
+        text_chunks = [c for c in chunks if c.metadata.get("modality") != "image"]
+        image_chunks = [c for c in chunks if c.metadata.get("modality") == "image"]
 
-            try:
-                kwargs_body = {}
-                if input_type:
-                    kwargs_body["extra_body"] = {"input_type": input_type, "encoding_format": "float"}
+        for i in range(0, len(text_chunks), batch_size):
+            batch = text_chunks[i:i + batch_size]
+            vectors_by_id.update(self._embed_text_batch(batch, model, input_type))
 
-                resp = self.client.embeddings.create(
-                    model=model,
-                    input=texts,
-                    **kwargs_body,
-                )
-                for chunk, data in zip(batch, resp.data):
-                    all_vectors.append(EmbeddingVector(
-                        chunk=chunk,
-                        vector=data.embedding,
-                    ))
-            except Exception as e:
-                logger.error(f"Embedding batch error: {e}")
-                # Return zero vectors for failed batch
-                for chunk in batch:
-                    all_vectors.append(EmbeddingVector(
-                        chunk=chunk,
-                        vector=[0.0] * self.dimensions,
-                    ))
+        for chunk in image_chunks:
+            vectors_by_id[chunk.id] = self._embed_image_chunk(chunk, model, input_type)
 
-        return all_vectors
+        return [
+            EmbeddingVector(
+                chunk=chunk,
+                vector=vectors_by_id.get(chunk.id, self._zero_vector()),
+            )
+            for chunk in chunks
+        ]
 
 # ============================
 # SPARSE (BM25-like) EMBEDDING STRATEGIES

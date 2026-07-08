@@ -7,7 +7,6 @@ import os
 import threading
 
 from services.collection_sync_service import sync_all_monitored_collections
-from services.connector_sync_service import sync_all_monitored_connectors
 
 logger = logging.getLogger(__name__)
 
@@ -43,12 +42,15 @@ class MonitorWorker:
             try:
                 from datetime import datetime, timezone
 
-                self.last_connector_results = sync_all_monitored_connectors()
+                # Collection sync runs Pathway connector sync + incremental index CRUD
                 self.last_collection_results = sync_all_monitored_collections()
+                self.last_connector_results = [
+                    r for row in self.last_collection_results
+                    for r in (row.get("connectors_synced") or [])
+                ]
                 self.last_run_at = datetime.now(timezone.utc).isoformat()
                 logger.info(
-                    "Monitor cycle: %d connector(s), %d collection(s)",
-                    len(self.last_connector_results),
+                    "Monitor cycle: %d collection(s) reconciled",
                     len(self.last_collection_results),
                 )
             except Exception:

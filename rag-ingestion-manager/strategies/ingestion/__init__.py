@@ -10,8 +10,9 @@ from core.registry import StrategyRegistry
 
 logger = logging.getLogger(__name__)
 
-# Auto-import our kreuzberg strategy so it's registered
+# Auto-import strategies so they register on import
 from . import kreuzberg_ingestion  # noqa: F401
+from . import image_ingestion  # noqa: F401
 
 
 @StrategyRegistry.register("ingestion", "text_ingestion")

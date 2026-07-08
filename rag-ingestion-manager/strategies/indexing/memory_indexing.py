@@ -99,6 +99,53 @@ class MemoryIndexing(BaseMemoryIndexingStrategy):
         except Exception as e:
             logger.error(f"MemoryIndexing: Redis error — {e}")
 
+    def index_document_catalog(
+        self,
+        documents: list,
+        chunks: list,
+        **kwargs,
+    ) -> None:
+        """Persist per-document chunk catalog for memory-augmented retrieval."""
+        if self.redis is None:
+            logger.warning("MemoryIndexing: Redis unavailable — skipping document catalog")
+            return
+
+        collection_name = kwargs.get("collection_name", "rag_documents")
+        connector_id = kwargs.get("connector_id", "")
+        external_id = kwargs.get("external_id", "")
+        if not connector_id or not external_id:
+            return
+
+        ttl = int(kwargs.get("ttl_seconds", 86400 * 7))
+        key = f"rag:doc:{collection_name}:{connector_id}:{external_id}"
+        previews = [
+            {
+                "chunk_id": c.id,
+                "chunk_index": c.chunk_index,
+                "preview": (c.content or "")[:300],
+            }
+            for c in chunks[:50]
+        ]
+        payload = {
+            "collection_name": collection_name,
+            "connector_id": connector_id,
+            "external_id": external_id,
+            "filename": kwargs.get("filename") or (documents[0].filename if documents else ""),
+            "content_hash": kwargs.get("content_hash", ""),
+            "chunk_count": len(chunks),
+            "chunks": previews,
+        }
+        try:
+            self.redis.setex(key, ttl, json.dumps(payload))
+            logger.info(
+                "MemoryIndexing: cataloged document %s/%s (%d chunks)",
+                connector_id,
+                external_id,
+                len(chunks),
+            )
+        except Exception as e:
+            logger.error(f"MemoryIndexing: document catalog error — {e}")
+
     def get_session(self, session_id: str, collection_name: str = "rag_documents") -> Optional[dict]:
         """Retrieve session context from Redis."""
         if self.redis is None:

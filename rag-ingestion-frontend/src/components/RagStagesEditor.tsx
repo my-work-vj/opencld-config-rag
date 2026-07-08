@@ -140,15 +140,14 @@ export default function RagStagesEditor({
                 name="doc-subtype"
                 checked={ingestionMode === 'document_vision'}
                 onChange={() => onChangeIngestionMode('document_vision')}
-                disabled
-                className="mt-1 h-4 w-4 text-gray-300"
+                className="mt-1 h-4 w-4 text-blue-600"
               />
               <div>
-                <span className="block text-sm font-medium text-gray-400">
+                <span className="block text-sm font-medium text-gray-800">
                   Image &amp; graph understanding
                 </span>
-                <span className="block text-xs text-gray-400">
-                  Extracts tables, diagrams &amp; images — coming soon
+                <span className="block text-xs text-gray-500">
+                  Standalone images use multimodal embeddings via nvidia-embed (Path B)
                 </span>
               </div>
             </label>

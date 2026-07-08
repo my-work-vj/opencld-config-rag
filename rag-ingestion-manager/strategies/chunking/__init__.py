@@ -251,3 +251,5 @@ class MultiGranularityChunkingAlias(MultiGranularityChunking):
 @StrategyRegistry.register("chunking", "hierarchical")
 class HierarchicalChunkingAlias(MultiGranularityChunking):
     pass
+
+from . import image_chunking  # noqa: F401, E402

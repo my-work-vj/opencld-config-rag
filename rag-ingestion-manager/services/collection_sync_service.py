@@ -12,7 +12,7 @@ from connectors.pathway.container import container_to_host_path
 from connectors.google_drive import source_type_for_path
 from connectors.runner import connector_supports_ui_upload, run_connector_sync
 from core.pipeline import IngestionPipeline
-from monitoring.qdrant_ops import delete_connector_file_vectors
+from monitoring.index_ops import delete_document_from_all_indexes
 from rag_shared.collection_connector_repo import CollectionConnectorRepo
 from rag_shared.collection_loader import load_collection_ingestion_config
 from rag_shared.connector_file_repo import ConnectorFileRepo
@@ -22,6 +22,7 @@ from rag_shared.indexed_document_repo import IndexedDocumentRepo
 from rag_shared.knowledge_repo import KnowledgeSourceRepo
 from qdrant_client import QdrantClient
 from evaluation.runner import run_evaluation
+from services.ingestion_router import resolve_pipeline_overrides
 
 logger = logging.getLogger(__name__)
 
@@ -54,24 +55,24 @@ def _run_connector_file_ingest(
     connector_metadata: dict,
 ) -> dict:
     """
-    Ingest a single file and return metrics for evaluation.
+    Ingest a single file using the collection's configured pipeline stages.
 
-    Returns a dict with:
-        - document_count, chunk_count, document_id (as before)
-        - plus evaluation data: documents, chunks, embeddings, errors, file_size_bytes, stage_timings
+    Returns document/chunk counts plus evaluation data.
     """
     _ensure_pipeline_strategies()
     db = SharedSession()
+    index_config: dict = {}
+    ingestion_mode = "document_plain"
     try:
         ks = KnowledgeSourceRepo.get(db, knowledge_source_name)
         KnowledgeSourceRepo.set_status(db, knowledge_source_name, "indexing")
         collection_name = ks.collection_name
-        vector_size = ks.vector_size or 2048
-        embedding_model = ks.embedding_model or ""
+        meta = ks.metadata_json or {}
+        index_config = meta.get("index_config") or {}
+        ingestion_mode = meta.get("ingestion_mode", "document_plain")
     finally:
         db.close()
 
-    # Initialize evaluation data containers
     documents: List[Any] = []
     chunks: List[Any] = []
     embeddings: List[Any] = []
@@ -79,6 +80,7 @@ def _run_connector_file_ingest(
     stage_timings: Dict[str, float] = {}
     file_size_bytes = os.path.getsize(source_path) if os.path.exists(source_path) else 0
     overall_start = time.time()
+    content_hash = file_content_hash(Path(source_path)) if os.path.exists(source_path) else ""
 
     try:
         shared_db = SharedSession()
@@ -87,84 +89,33 @@ def _run_connector_file_ingest(
         finally:
             shared_db.close()
 
-        # Use kreuzberg_ingestion as the unified ingestion strategy for all document types.
-        # Kreuzberg handles 96 formats (PDF, Office, images, HTML, text, etc.) — plain text only.
-        config["pipeline"]["stages"]["ingestion"] = {
-            "strategy": "kreuzberg_ingestion",
-            "config": {},
-        }
+        ingestion_stage = config["pipeline"]["stages"].get("ingestion", {})
+        if not ingestion_stage.get("strategy"):
+            config["pipeline"]["stages"]["ingestion"] = {
+                "strategy": "kreuzberg_ingestion",
+                "config": {},
+            }
 
         pipeline = IngestionPipeline(config)
-        ingestion_overrides: dict = {
-            "strategy": "kreuzberg_ingestion",
-            "config": {},
-        }
+        ingestion_overrides, chunking_overrides = resolve_pipeline_overrides(
+            source_path,
+            ingestion_mode=ingestion_mode,
+        )
+        ctx = pipeline.run(
+            source_path,
+            source_metadata=connector_metadata,
+            content_hash=content_hash,
+            ingestion_overrides=ingestion_overrides,
+            chunking_overrides=chunking_overrides,
+        )
 
-        # Ingestion stage
-        try:
-            t0 = time.time()
-            documents = pipeline.run_ingestion(source_path, **ingestion_overrides)
-            stage_timings["ingestion"] = time.time() - t0
-        except Exception as e:
-            errors.append((source_path, f"Ingestion failed: {e}"))
-            documents = []
+        documents = ctx.documents
+        chunks = ctx.chunks
+        embeddings = ctx.embeddings
+        stage_timings = ctx.state.get("timings", {})
 
-        # Only proceed if ingestion succeeded
-        if not errors:
-            for doc in documents:
-                doc.metadata.update(connector_metadata)
-                if connector_metadata.get("filename"):
-                    doc.filename = connector_metadata["filename"]
-
-            # Chunking stage
-            try:
-                t0 = time.time()
-                chunks = pipeline.run_chunking(documents)
-                stage_timings["chunking"] = time.time() - t0
-            except Exception as e:
-                errors.append((source_path, f"Chunking failed: {e}"))
-                chunks = []
-
-        # Only proceed if chunking succeeded
-        if not errors:
-            # Embedding stage
-            try:
-                t0 = time.time()
-                embeddings = pipeline.run_embedding(chunks)
-                stage_timings["embedding"] = time.time() - t0
-            except Exception as e:
-                errors.append((source_path, f"Embedding failed: {e}"))
-                embeddings = []
-
-        # Only proceed if embedding succeeded
-        if not errors:
-            # Sparse embedding stage (optional — only if config has sparse_embedding)
-            sparse_vectors = []
-            try:
-                sparse_vectors = pipeline.run_sparse_embedding(chunks)
-            except Exception as e:
-                # Sparse embedding is optional — don't fail the pipeline
-                logger.debug("Sparse embedding skipped or failed: %s", e)
-
-        # Only proceed if embedding succeeded
-        if not errors:
-            # Indexing stage — multi-index dispatch (Qdrant dense + sparse + metadata + Neo4j)
-            try:
-                t0 = time.time()
-                pipeline.run_indexing(
-                    embeddings=embeddings,
-                    sparse_vectors=sparse_vectors,
-                    documents=documents,
-                    chunks=chunks,
-                    config={
-                        "collection_name": collection_name,
-                        "vector_size": vector_size,
-                        "model": embedding_model,
-                    },
-                )
-                stage_timings["indexing"] = time.time() - t0
-            except Exception as e:
-                errors.append((source_path, f"Indexing failed: {e}"))
+        if not documents:
+            errors.append((source_path, "Ingestion produced 0 documents"))
 
     except Exception as exc:
         db = SharedSession()
@@ -174,14 +125,10 @@ def _run_connector_file_ingest(
             db.close()
         raise RuntimeError(f"Ingestion failed: {exc}") from exc
 
-    # Document + chunk metadata persistence is now handled
-    # by the metadata_indexing strategy in the pipeline.
-    # The code below is kept for backward compat evaluation metrics only.
     doc_count = len(documents)
     chunk_count = len(chunks)
     document_id = documents[0].id if documents else None
 
-    # Run evaluation on this file's ingestion
     eval_result = None
     if not errors and documents:
         sync_duration = time.time() - overall_start
@@ -219,13 +166,11 @@ def _run_connector_file_ingest(
         except Exception as eval_exc:
             logger.warning("Evaluation failed for %s: %s", source_path, eval_exc)
 
-    # Return the original keys plus evaluation data
     result = {
         "document_count": doc_count,
         "chunk_count": chunk_count,
         "document_id": document_id,
         "collection_name": collection_name,
-        # Evaluation data
         "evaluation": {
             "documents": documents,
             "chunks": chunks,
@@ -236,7 +181,6 @@ def _run_connector_file_ingest(
         "eval_result": eval_result,
     }
 
-    # Add aggregated layer totals for API convenience
     if eval_result and isinstance(eval_result, dict):
         result["evaluation"]["layers"] = {
             "extraction": eval_result.get("extraction_summary"),
@@ -266,6 +210,7 @@ def sync_collection(knowledge_source_name: str) -> dict:
             db, knowledge_source_name, ks.metadata_json
         )
         qdrant_collection = ks.collection_name
+        index_config = (ks.metadata_json or {}).get("index_config")
         if not connector_ids:
             return {
                 "collection": knowledge_source_name,
@@ -306,15 +251,30 @@ def sync_collection(knowledge_source_name: str) -> dict:
             if not allow_local_uploads:
                 files = [f for f in files if not f.external_id.startswith("local:")]
             indexed = IndexedDocumentRepo.list_for_collection(db, knowledge_source_name, connector_id)
-            indexed_by_file_id = {r.connector_file_id: r for r in indexed}
+            indexed_snapshots = [
+                {
+                    "id": r.id,
+                    "connector_file_id": r.connector_file_id,
+                    "connector_id": r.connector_id,
+                    "external_id": r.external_id,
+                    "content_hash": r.content_hash or "",
+                    "chunk_count": r.chunk_count or 0,
+                }
+                for r in indexed
+            ]
+            indexed_by_file_id = {s["connector_file_id"]: s for s in indexed_snapshots}
             current_file_ids = {f.id for f in files}
 
-            for record in indexed:
-                if record.connector_file_id not in current_file_ids:
-                    delete_connector_file_vectors(
-                        qdrant_collection, record.connector_id, record.external_id
+            for snap in indexed_snapshots:
+                if snap["connector_file_id"] not in current_file_ids:
+                    delete_document_from_all_indexes(
+                        qdrant_collection,
+                        knowledge_source_name,
+                        snap["connector_id"],
+                        snap["external_id"],
+                        index_config,
                     )
-                    IndexedDocumentRepo.delete(db, record.id)
+                    IndexedDocumentRepo.delete(db, snap["id"])
                     stats["deleted"] += 1
 
             for connector_file in files:
@@ -326,15 +286,23 @@ def sync_collection(knowledge_source_name: str) -> dict:
                 content_hash = file_content_hash(path)
                 existing = indexed_by_file_id.get(connector_file.id)
 
-                if existing and existing.content_hash == content_hash and existing.chunk_count > 0:
+                if (
+                    existing
+                    and existing["content_hash"] == content_hash
+                    and existing["chunk_count"] > 0
+                ):
                     stats["unchanged"] += 1
                     continue
 
                 if existing:
-                    delete_connector_file_vectors(
-                        qdrant_collection, existing.connector_id, existing.external_id
+                    delete_document_from_all_indexes(
+                        qdrant_collection,
+                        knowledge_source_name,
+                        existing["connector_id"],
+                        existing["external_id"],
+                        index_config,
                     )
-                    IndexedDocumentRepo.delete(db, existing.id)
+                    IndexedDocumentRepo.delete(db, existing["id"])
                     stats["updated"] += 1
                 else:
                     stats["added"] += 1

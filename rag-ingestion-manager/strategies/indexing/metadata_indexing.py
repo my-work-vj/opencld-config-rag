@@ -104,6 +104,16 @@ class MetadataIndexing(BaseMetadataIndexingStrategy):
                     if parent_record:
                         parent_id = parent_record.id
 
+                doc_record = doc_map.get(chunk.document_id)
+                if doc_record is None:
+                    logger.warning(
+                        "MetadataIndexing: chunk %s references unknown document %s",
+                        chunk.id,
+                        chunk.document_id,
+                    )
+                    continue
+                doc_db_id = doc_record.id if hasattr(doc_record, "id") else str(doc_record)
+
                 # Check if chunk already exists by chunk_id
                 existing_chunk = (
                     db.query(ChunkRecord)
@@ -114,21 +124,18 @@ class MetadataIndexing(BaseMetadataIndexingStrategy):
                 if existing_chunk:
                     existing_chunk.content = chunk.content
                     existing_chunk.metadata_json = chunk.metadata
+                    existing_chunk.document_id = doc_db_id
                 else:
                     cr = ChunkRecord(
                         id=chunk.id,
-                        document_id=doc_map.get(chunk.document_id, chunk.document_id)
-                        if isinstance(doc_map.get(chunk.document_id), str)
-                        else doc_map[chunk.document_id].id
-                        if chunk.document_id in doc_map
-                        else chunk.document_id,
+                        document_id=doc_db_id,
                         content=chunk.content,
                         chunk_index=chunk.chunk_index,
                         chunk_level=chunk.chunk_level,
                         parent_chunk_id=parent_id,
-                        filename=chunk.filename or doc_map.get(chunk.document_id, {}).filename
-                        if hasattr(doc_map.get(chunk.document_id), 'filename')
-                        else chunk.filename,
+                        filename=chunk.filename or (
+                            doc_record.filename if hasattr(doc_record, "filename") else chunk.filename
+                        ),
                         metadata_json=chunk.metadata,
                     )
                     db.add(cr)
