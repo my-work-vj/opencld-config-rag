@@ -12,6 +12,8 @@ build/
 .claude/
 plan.md
 data/connectors/
+**/data/connectors/
+rag-ingestion-manager/data/connectors/
 **/credentials.json
 eval_reports/
 check_*.py

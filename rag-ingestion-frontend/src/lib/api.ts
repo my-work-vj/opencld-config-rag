@@ -20,6 +20,7 @@ import type {
   IngestRequest,
   IngestResponse,
   KnowledgeBase,
+  KnowledgeBaseIndexCatalog,
   KnowledgeBaseListResponse,
   KnowledgeSource,
   KnowledgeSourceIngestRequest,
@@ -247,6 +248,11 @@ export const api = {
   knowledgeBase: (name: string) =>
 
     request<KnowledgeBase>(`/knowledge-bases/${encodeURIComponent(name)}`),
+
+  knowledgeBaseIndexCatalog: (name: string) =>
+    request<KnowledgeBaseIndexCatalog>(
+      `/knowledge-bases/${encodeURIComponent(name)}/index-catalog`,
+    ),
 
   createKnowledgeBase: (body: CreateKnowledgeBaseRequest) =>
 

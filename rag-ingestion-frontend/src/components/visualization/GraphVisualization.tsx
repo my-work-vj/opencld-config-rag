@@ -39,8 +39,9 @@ export function GraphVisualization({ data }: GraphVisualizationProps) {
     const canvas = canvasRef.current
     if (!canvas || data.nodes.length === 0) return
 
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
+    const rawCtx = canvas.getContext('2d')
+    if (!rawCtx) return
+    const ctx: CanvasRenderingContext2D = rawCtx
 
     const parent = canvas.parentElement
     if (!parent) return
@@ -51,7 +52,7 @@ export function GraphVisualization({ data }: GraphVisualizationProps) {
     canvas.height = height
 
     // Create nodes with initial positions
-    const nodes: NodePos[] = data.nodes.map((n, i) => ({
+    const nodes: NodePos[] = data.nodes.map((n) => ({
       id: n.id,
       x: Math.random() * width * 0.8 + width * 0.1,
       y: Math.random() * height * 0.8 + height * 0.1,
@@ -181,7 +182,7 @@ export function GraphVisualization({ data }: GraphVisualizationProps) {
   if (data.nodes.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-16 text-slate-400">
-        <p>{data.message || 'No graph data available for this collection.'}</p>
+        <p>{data.message || 'No graph data available for this profile.'}</p>
         <p className="mt-2 text-sm text-slate-500">Ingest documents with graph indexing enabled to see relationships.</p>
       </div>
     )

@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 # Auto-import strategies so they register on import
 from . import kreuzberg_ingestion  # noqa: F401
 from . import image_ingestion  # noqa: F401
+from . import pdf_vision_ingestion  # noqa: F401
 
 
 @StrategyRegistry.register("ingestion", "text_ingestion")

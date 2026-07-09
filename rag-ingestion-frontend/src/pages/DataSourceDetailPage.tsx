@@ -133,7 +133,7 @@ export function DataSourceDetailPage() {
             <CardTitle>Sync status</CardTitle>
             <CardDescription>
               This connector is monitored in the background. Remote changes sync automatically
-              and linked collections are re-indexed.
+              and linked index profiles are re-indexed.
             </CardDescription>
           </CardHeader>
           <dl className="grid gap-3 text-sm mb-4">
@@ -171,7 +171,7 @@ export function DataSourceDetailPage() {
           <CardDescription>
             {isDriveSource
               ? 'Read-only mirror of your Google Drive folder — add, update, or remove files in Drive to sync.'
-              : 'Files in this connector — updates propagate to linked collections automatically.'}
+              : 'Files in this connector — updates propagate to linked index profiles automatically.'}
           </CardDescription>
         </CardHeader>
         {files.isLoading ? (
@@ -180,7 +180,7 @@ export function DataSourceDetailPage() {
           <p className="text-sm text-slate-500">
             {isDriveSource
               ? 'No files synced yet. Add files to the linked Google Drive folder — changes are detected automatically.'
-              : 'No files yet. Upload from a linked collection or add files to the remote source.'}
+              : 'No files yet. Upload from a linked index profile or add files to the remote source.'}
           </p>
         ) : (
           <ul className="space-y-2">

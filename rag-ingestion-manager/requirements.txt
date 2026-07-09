@@ -16,4 +16,5 @@ google-auth>=2.20.0
 kreuzberg>=4.0.0
 redis>=5.0.0
 neo4j>=5.0.0
+pymupdf>=1.24.0
 # Data source connectors sync via Pathway Docker (pathwaycom/pathway) — no host pathway package required.

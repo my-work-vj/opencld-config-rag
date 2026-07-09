@@ -456,12 +456,16 @@ async def delete_collection(name: str, delete_collection_vectors: bool = False):
 
 
 def _run_collection_ingest(name: str, source_path: str, source_type: str) -> dict:
+    from services.ingestion_router import resolve_pipeline_overrides
+
     db = SharedSession()
     try:
         ks = KnowledgeSourceRepo.get(db, name)
         KnowledgeSourceRepo.set_status(db, name, "indexing")
         collection_name = ks.collection_name
         ks_name = ks.name
+        meta = ks.metadata_json or {}
+        ingestion_mode = meta.get("ingestion_mode", "document_plain")
     finally:
         db.close()
 
@@ -472,20 +476,29 @@ def _run_collection_ingest(name: str, source_path: str, source_type: str) -> dic
         finally:
             shared_db.close()
 
-        if source_type == "pdf":
-            config["pipeline"]["stages"]["ingestion"] = {
-                "strategy": "pdf_ingestion",
-                "config": {},
-            }
-        elif source_type == "web":
-            config["pipeline"]["stages"]["ingestion"] = {
-                "strategy": "web_ingestion",
-                "config": {},
-            }
+        ingestion_overrides, chunking_overrides = resolve_pipeline_overrides(
+            source_path,
+            ingestion_mode=ingestion_mode,
+            source_type=source_type,
+        )
+
+        if not ingestion_overrides:
+            if source_type == "pdf":
+                config["pipeline"]["stages"]["ingestion"] = {
+                    "strategy": "pdf_ingestion",
+                    "config": {},
+                }
+            elif source_type == "web":
+                config["pipeline"]["stages"]["ingestion"] = {
+                    "strategy": "web_ingestion",
+                    "config": {},
+                }
 
         pipeline = IngestionPipeline(config)
         ctx = pipeline.run(
             source=source_path,
+            ingestion_overrides=ingestion_overrides,
+            chunking_overrides=chunking_overrides,
             indexing_overrides={"config": {"collection_name": collection_name}},
         )
     except Exception as exc:

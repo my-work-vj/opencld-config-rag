@@ -5,15 +5,13 @@ import { api } from '@/lib/api'
 import {
   BarChart4,
   RefreshCw,
-  CheckCircle2,
-  XCircle,
-  AlertTriangle,
   ChevronRight,
 } from 'lucide-react'
-import { Card, CardHeader, CardTitle, CardDescription } from '@/components/ui/Card'
+import { Card } from '@/components/ui/Card'
 import { StatusDot } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
-import type { EvalResult, CollectionInfo } from '@/types/api'
+import type { EvalResult } from '@/types/api'
+import { INDEX_PROFILE_PLURAL } from '@/lib/terminology'
 
 function pct(v: number | undefined | null, decimals = 0): string {
   if (v === undefined || v === null) return '—'
@@ -56,7 +54,7 @@ function evaluationFeedback(evalResult: EvalResult | undefined): {
 
 export default function EvaluationDashboardPage() {
   const queryClient = useQueryClient()
-  const [selected, setSelected] = useState<string | null>(null)
+  const [evaluatingName, setEvaluatingName] = useState<string | null>(null)
   const [evalResults, setEvalResults] = useState<Record<string, EvalResult>>({})
 
   const collectionsQuery = useQuery({
@@ -87,11 +85,14 @@ export default function EvaluationDashboardPage() {
     collectionsQuery.isLoading
 
   const handleEvaluateSingle = async (name: string) => {
+    setEvaluatingName(name)
     try {
       const result = await api.evaluateCollection(name)
       setEvalResults((prev) => ({ ...prev, [name]: result }))
     } catch {
       /* ignore */
+    } finally {
+      setEvaluatingName(null)
     }
   }
 
@@ -101,7 +102,7 @@ export default function EvaluationDashboardPage() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-white">Evaluation Dashboard</h1>
           <p className="mt-1 text-sm text-slate-400">
-            Ingestion pipeline quality metrics across all collections
+            Ingestion pipeline quality metrics across all {INDEX_PROFILE_PLURAL.toLowerCase()}
           </p>
         </div>
         <Button
@@ -120,14 +121,14 @@ export default function EvaluationDashboardPage() {
 
       {isLoading && (
         <Card>
-          <p className="py-8 text-center text-sm text-slate-500">Loading collections…</p>
+          <p className="py-8 text-center text-sm text-slate-500">Loading {INDEX_PROFILE_PLURAL.toLowerCase()}…</p>
         </Card>
       )}
 
       {!isLoading && collections.length === 0 && (
         <Card>
           <p className="py-8 text-center text-sm text-slate-500">
-            No collections found. Create one first.
+            No index profiles found. Create one first.
           </p>
         </Card>
       )}
@@ -184,9 +185,9 @@ export default function EvaluationDashboardPage() {
                     variant="secondary"
                     size="sm"
                     onClick={() => handleEvaluateSingle(name)}
-                    disabled={pending}
+                    disabled={pending || evaluatingName === name}
                   >
-                    <RefreshCw className={`mr-1 size-3.5 ${pending && selected === name ? 'animate-spin' : ''}`} />
+                    <RefreshCw className={`mr-1 size-3.5 ${evaluatingName === name ? 'animate-spin' : ''}`} />
                     Evaluate
                   </Button>
                   <Link

@@ -100,6 +100,7 @@ def _run_connector_file_ingest(
         ingestion_overrides, chunking_overrides = resolve_pipeline_overrides(
             source_path,
             ingestion_mode=ingestion_mode,
+            source_type=source_type,
         )
         ctx = pipeline.run(
             source_path,

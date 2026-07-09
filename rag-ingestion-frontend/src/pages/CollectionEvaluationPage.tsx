@@ -14,9 +14,7 @@ import {
   Search,
 } from 'lucide-react'
 import { Card, CardHeader, CardTitle, CardDescription } from '@/components/ui/Card'
-import { StatusDot } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
-import type { EvalResult, ThresholdReport, ExtractionMetrics, ChunkingMetrics, EmbeddingMetrics, PipelineHealthMetrics, RetrievalMetrics } from '@/types/api'
 
 function pct(v: number | undefined | null, decimals = 1): string {
   if (v === undefined || v === null) return '—'

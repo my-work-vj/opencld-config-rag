@@ -8,7 +8,13 @@ import { Label, Input, Textarea } from '@/components/ui/Field'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { EmptyState, Spinner } from '@/components/ui/Feedback'
+import { AggregatedIndexBadges } from '@/components/KbCatalogBadges'
 import type { KnowledgeBase } from '@/types/api'
+import {
+  INDEX_PROFILES_PATH,
+  INDEX_PROFILE_PLURAL,
+  INDEX_PROFILE_SINGULAR,
+} from '@/lib/terminology'
 
 export function KnowledgeBasesPage() {
   const queryClient = useQueryClient()
@@ -60,7 +66,7 @@ export function KnowledgeBasesPage() {
       return
     }
     if (selectedCollections.length === 0) {
-      setError('Select at least one collection')
+      setError(`Select at least one ${INDEX_PROFILE_SINGULAR.toLowerCase()}`)
       return
     }
     createMutation.mutate({
@@ -86,8 +92,8 @@ export function KnowledgeBasesPage() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-white">Knowledge Bases</h1>
           <p className="mt-1 max-w-2xl text-sm text-slate-400">
-            Knowledge clusters group one or more vector collections. Only knowledge bases connect
-            to retrieval and query pipelines — not individual collections.
+            Knowledge clusters group one or more index profiles. Only knowledge bases connect
+            to retrieval and query pipelines — not individual profiles.
           </p>
         </div>
         <Button onClick={() => setShowForm(!showForm)} variant="secondary">
@@ -101,7 +107,7 @@ export function KnowledgeBasesPage() {
           <CardHeader>
             <CardTitle>Create knowledge base</CardTitle>
             <CardDescription>
-              Select collections to search together at query time via agents.
+              Select index profiles to search together at query time via agents.
             </CardDescription>
           </CardHeader>
           <form onSubmit={handleCreate} className="space-y-4">
@@ -125,12 +131,12 @@ export function KnowledgeBasesPage() {
               />
             </div>
             <div className="space-y-2">
-              <Label>Collections *</Label>
+              <Label>{INDEX_PROFILE_PLURAL} *</Label>
               {(collections.data ?? []).length === 0 ? (
                 <p className="text-sm text-slate-500">
-                  No collections yet.{' '}
-                  <Link to="/collections" className="text-indigo-400 hover:underline">
-                    Create a collection
+                  No index profiles yet.{' '}
+                  <Link to={INDEX_PROFILES_PATH} className="text-indigo-400 hover:underline">
+                    Create an index profile
                   </Link>
                 </p>
               ) : (
@@ -163,7 +169,7 @@ export function KnowledgeBasesPage() {
       {list.length === 0 ? (
         <EmptyState
           title="No knowledge bases"
-          description="Create a knowledge base cluster from your indexed collections."
+          description={`Create a knowledge base cluster from your indexed ${INDEX_PROFILE_PLURAL.toLowerCase()}.`}
           action={<Button onClick={() => setShowForm(true)}>Create knowledge base</Button>}
         />
       ) : (
@@ -176,6 +182,10 @@ export function KnowledgeBasesPage() {
 }
 
 function KbCard({ base }: { base: KnowledgeBase }) {
+  const aggregated = Array.from(
+    new Set(base.sources.flatMap((s) => s.enabled_indexes ?? [])),
+  ).sort()
+
   return (
     <Card elevated className="flex flex-col">
       <div className="flex items-start gap-2">
@@ -186,11 +196,17 @@ function KbCard({ base }: { base: KnowledgeBase }) {
         {base.description || 'Knowledge cluster'}
       </CardDescription>
       <div className="mt-3 flex flex-wrap gap-2">
-        <Badge variant="outline">{base.sources.length} collections</Badge>
+        <Badge variant="outline">{base.sources.length} profiles</Badge>
         {base.sources.slice(0, 3).map((s) => (
           <Badge key={s.source_name} variant="outline">{s.source_name}</Badge>
         ))}
       </div>
+      {aggregated.length > 0 && (
+        <div className="mt-3">
+          <p className="mb-1.5 text-xs text-slate-500">Indexes in cluster</p>
+          <AggregatedIndexBadges indexes={aggregated} />
+        </div>
+      )}
       <div className="mt-4">
         <Link to={`/knowledge-bases/${encodeURIComponent(base.name)}`}>
           <Button variant="secondary" className="w-full" size="sm">

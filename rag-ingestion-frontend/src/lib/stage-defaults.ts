@@ -33,6 +33,7 @@ export function resolveStageMaps(
   configOverrides: Record<string, string>,
   models: { embeddingModel: string },
 ) {
+  void models
   const ingestion: Record<string, StageConfigValue> = {}
   for (const stage of INGESTION_STAGE_NAMES) {
     const base = baseIngestion[stage]

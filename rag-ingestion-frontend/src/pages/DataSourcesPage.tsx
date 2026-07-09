@@ -110,7 +110,7 @@ export function DataSourcesPage() {
           <h1 className="text-2xl font-bold tracking-tight text-white">Data Sources</h1>
           <p className="mt-1 max-w-2xl text-sm text-slate-400">
             Establish connectors to external systems and manage synced files. Sync runs via
-            Pathway Docker (pw.io.gdrive). Collections link to these sources for indexing.
+            Pathway Docker (pw.io.gdrive). Index profiles link to these sources for ingestion.
           </p>
         </div>
         <Button onClick={() => setShowForm(!showForm)} variant="secondary">

@@ -4,7 +4,7 @@ export function VectorVisualization({ data }: { data: VectorVisualizationRespons
   if (!data.available) {
     return (
       <div className="py-8 text-center text-slate-400">
-        <p>{data.message || 'Vector index not available for this collection.'}</p>
+        <p>{data.message || 'Vector index not available for this profile.'}</p>
       </div>
     )
   }
@@ -61,7 +61,7 @@ export function SparseVisualization({ data }: { data: SparseVisualizationRespons
   if (!data.available) {
     return (
       <div className="py-8 text-center text-slate-400">
-        <p>{data.message || 'Sparse vector index not available for this collection.'}</p>
+        <p>{data.message || 'Sparse vector index not available for this profile.'}</p>
       </div>
     )
   }
@@ -109,7 +109,7 @@ export function MetadataVisualization({ data }: { data: MetadataVisualizationRes
   if (!data.available) {
     return (
       <div className="py-8 text-center text-slate-400">
-        <p>{data.message || 'Metadata not available for this collection.'}</p>
+        <p>{data.message || 'Metadata not available for this profile.'}</p>
       </div>
     )
   }
@@ -147,7 +147,7 @@ export function MemoryVisualization({ data }: { data: MemoryVisualizationRespons
   if (!data.available) {
     return (
       <div className="py-8 text-center text-slate-400">
-        <p>{data.message || 'Memory store not available for this collection.'}</p>
+        <p>{data.message || 'Memory store not available for this profile.'}</p>
       </div>
     )
   }

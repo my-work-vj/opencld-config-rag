@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams, useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, Cloud, Database, Eye, GitBranch, MemoryStick, Settings2, Table, Trash2, Upload, Waves } from 'lucide-react'
+import { ArrowLeft, Cloud, Database, GitBranch, MemoryStick, Settings2, Table, Trash2, Upload, Waves } from 'lucide-react'
 import { api, ApiError } from '@/lib/api'
 import { AUTO_SYNC_POLL_MS, syncPollInterval } from '@/lib/poll'
 import { Card, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card'
@@ -25,6 +25,11 @@ import {
   SparseVisualization,
   VectorVisualization,
 } from '@/components/visualization/IndexVisualizations'
+import {
+  INDEX_PROFILES_PATH,
+  INDEX_PROFILE_PLURAL,
+  INDEX_PROFILE_SINGULAR,
+} from '@/lib/terminology'
 
 export function CollectionDetailPage() {
   const { name } = useParams<{ name: string }>()
@@ -44,7 +49,7 @@ export function CollectionDetailPage() {
   const [ingestionMode, setIngestionMode] = useState<IngestionMode>('document_plain')
   const [indexConfig, setIndexConfig] = useState<IndexConfig>(normalizeIndexConfig(null))
   const [vizModal, setVizModal] = useState<string | null>(null)
-  const [vizError, setVizError] = useState<string | null>(null)
+  const [, setVizError] = useState<string | null>(null)
 
   const llmModels = useQuery({
     queryKey: ['llm-models'],
@@ -111,7 +116,7 @@ export function CollectionDetailPage() {
           ? ` Note: ${data.errors[0]}`
           : ''
       setUploadResult(
-        `Uploaded ${data.files_uploaded} file(s). Indexing ${data.collections_synced.length} collection(s)…${warn}`,
+        `Uploaded ${data.files_uploaded} file(s). Indexing ${data.collections_synced.length} index profile(s)…${warn}`,
       )
       setPickedFiles([])
       if (fileInputRef.current) fileInputRef.current.value = ''
@@ -127,7 +132,7 @@ export function CollectionDetailPage() {
 
   const deleteMutation = useMutation({
     mutationFn: () => api.deleteVectorCollection(decodedName),
-    onSuccess: () => navigate('/collections'),
+    onSuccess: () => navigate(INDEX_PROFILES_PATH),
   })
 
   const updateStagesMutation = useMutation({
@@ -233,9 +238,9 @@ export function CollectionDetailPage() {
   if (collection.isError || !collection.data) {
     return (
       <div className="space-y-4 text-center py-20">
-        <p className="text-red-400">Collection not found: {decodedName}</p>
-        <Link to="/collections">
-          <Button variant="secondary">Back to collections</Button>
+        <p className="text-red-400">{INDEX_PROFILE_SINGULAR} not found: {decodedName}</p>
+        <Link to={INDEX_PROFILES_PATH}>
+          <Button variant="secondary">Back to {INDEX_PROFILE_PLURAL.toLowerCase()}</Button>
         </Link>
       </div>
     )
@@ -285,9 +290,9 @@ export function CollectionDetailPage() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center gap-4">
         <Link
-          to="/collections"
+          to={INDEX_PROFILES_PATH}
           className="flex min-h-11 min-w-11 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-800/80 hover:text-white"
-          aria-label="Back to collections"
+          aria-label={`Back to ${INDEX_PROFILE_PLURAL.toLowerCase()}`}
         >
           <ArrowLeft className="size-5" />
         </Link>
@@ -295,7 +300,10 @@ export function CollectionDetailPage() {
           <Database className="size-7 text-indigo-400" aria-hidden="true" />
           <div>
             <h1 className="text-2xl font-bold text-white">{c.name}</h1>
-            <p className="font-mono text-sm text-indigo-300">{c.collection_name}</p>
+            <p className="text-xs text-slate-500">
+              Store namespace ·{' '}
+              <span className="font-mono text-indigo-300">{c.collection_name}</span>
+            </p>
           </div>
         </div>
         <Badge variant={c.status === 'ready' ? 'success' : 'outline'}>{c.status}</Badge>
@@ -465,7 +473,7 @@ export function CollectionDetailPage() {
             </CardTitle>
             <CardDescription>
               Upload, update, or delete files directly in the linked Google Drive folder. Changes
-              are detected automatically and indexed into this collection.
+              are detected automatically and indexed into this profile.
             </CardDescription>
           </CardHeader>
           <ul className="flex flex-wrap gap-2">
@@ -490,7 +498,7 @@ export function CollectionDetailPage() {
             Upload documents
           </CardTitle>
           <CardDescription>
-            Upload files to a linked data source. The connector and collection update automatically.
+            Upload files to a linked data source. The connector and index profile update automatically.
           </CardDescription>
         </CardHeader>
           <div className="space-y-4">
@@ -553,7 +561,7 @@ export function CollectionDetailPage() {
             <Link to="/data-sources" className="text-indigo-400 hover:underline">
               Create a data source
             </Link>{' '}
-            and link it when creating this collection.
+            and link it when creating this index profile.
           </p>
       </Card>
       )}
@@ -562,7 +570,7 @@ export function CollectionDetailPage() {
         <CardHeader>
           <CardTitle>Indexed documents</CardTitle>
           <CardDescription>
-            {docList.length} indexed · collection reports {c.document_count} docs / {c.chunk_count}{' '}
+            {docList.length} indexed · profile reports {c.document_count} docs / {c.chunk_count}{' '}
             chunks
           </CardDescription>
         </CardHeader>

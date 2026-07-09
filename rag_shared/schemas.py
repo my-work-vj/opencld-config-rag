@@ -337,6 +337,35 @@ class DataConnectorTestResponse(BaseModel):
 # ── Knowledge Base ——
 
 
+class KnowledgeBaseSourceInfo(BaseModel):
+    """Live catalog entry for an index profile linked to a knowledge base."""
+    source_name: str
+    collection_name: str
+    store_namespace: str = ""
+    vector_size: int = 2048
+    embedding_model: str = ""
+    index_config: dict[str, bool] = Field(default_factory=dict)
+    enabled_indexes: list[str] = Field(default_factory=list)
+    ingestion_mode: str = "document_plain"
+    data_connector_ids: list[str] = Field(default_factory=list)
+    status: str = "ready"
+    document_count: int = 0
+    chunk_count: int = 0
+    monitor_enabled: bool = True
+    modalities: list[str] = Field(default_factory=lambda: ["text"])
+
+
+class KnowledgeBaseIndexCatalog(BaseModel):
+    """Aggregated index catalog for RAG Builder / query strategies."""
+    knowledge_base: str
+    description: str = ""
+    profile_count: int = 0
+    profiles: list[KnowledgeBaseSourceInfo] = Field(default_factory=list)
+    aggregated_indexes: list[str] = Field(default_factory=list)
+    data_connector_ids: list[str] = Field(default_factory=list)
+    modalities: list[str] = Field(default_factory=list)
+
+
 class CreateKnowledgeBaseRequest(BaseModel):
     name: str = Field(..., description="Unique name, e.g. 'company-kb'")
     description: str = Field("", description="Human-readable description")
@@ -352,7 +381,7 @@ class KnowledgeBaseInfo(BaseModel):
     id: str
     name: str
     description: str
-    sources: list[dict]
+    sources: list[KnowledgeBaseSourceInfo] = Field(default_factory=list)
     created_at: Optional[str] = None
 
     model_config = {"from_attributes": True}

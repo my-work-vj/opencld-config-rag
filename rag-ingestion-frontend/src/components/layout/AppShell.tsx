@@ -12,11 +12,12 @@ import clsx from 'clsx'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { StatusDot } from '@/components/ui/Badge'
+import { INDEX_PROFILES_PATH, INDEX_PROFILE_PLURAL, PRODUCT_SUBTITLE, PRODUCT_TITLE } from '@/lib/terminology'
 
 const navItems = [
   { to: '/', label: 'Welcome', icon: Home, end: true },
   { to: '/data-sources', label: 'Data Sources', icon: Cloud },
-  { to: '/collections', label: 'Collections', icon: Database },
+  { to: INDEX_PROFILES_PATH, label: INDEX_PROFILE_PLURAL, icon: Database },
   { to: '/evaluation', label: 'Evaluation', icon: BarChart4 },
   { to: '/knowledge-bases', label: 'Knowledge Bases', icon: BookOpen },
 ]
@@ -41,8 +42,8 @@ export function AppShell() {
             <Sparkles className="size-5 text-indigo-400" aria-hidden="true" />
           </div>
           <div>
-            <p className="text-sm font-semibold text-white">OpenCLD RAG</p>
-            <p className="text-xs text-slate-400">Ingestion Manager</p>
+            <p className="text-sm font-semibold text-white">{PRODUCT_TITLE}</p>
+            <p className="text-xs text-slate-400">{PRODUCT_SUBTITLE}</p>
           </div>
         </div>
 

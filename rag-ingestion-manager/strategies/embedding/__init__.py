@@ -104,6 +104,34 @@ class LiteLLMEmbedding(BaseEmbeddingStrategy):
             logger.error("Image embedding error for %s: %s", image_path, exc)
             return self._zero_vector()
 
+    def _embed_text_image_chunk(self, chunk: Chunk, model: str, input_type: str) -> list[float]:
+        from services.modality import path_to_data_url
+
+        image_path = chunk.metadata.get("image_path") or chunk.metadata.get("path")
+        if not image_path:
+            return self._embed_text_batch([chunk], model, input_type).get(chunk.id, self._zero_vector())
+
+        try:
+            data_url = path_to_data_url(image_path)
+            text = (chunk.content or "").strip()
+            payload = [text, data_url] if text else [data_url]
+            resp = self.client.embeddings.create(
+                model=model,
+                input=payload,
+                extra_body={
+                    "input_type": input_type,
+                    "modality": "text_image",
+                    "encoding_format": "float",
+                },
+            )
+            vector = resp.data[0].embedding
+            if vector:
+                self.dimensions = len(vector)
+            return vector
+        except Exception as exc:
+            logger.error("Text-image embedding error for %s: %s", image_path, exc)
+            return self._zero_vector()
+
     def embed(self, chunks: List[Chunk], **kwargs) -> List[EmbeddingVector]:
         if not chunks:
             return []
@@ -113,8 +141,12 @@ class LiteLLMEmbedding(BaseEmbeddingStrategy):
         input_type = kwargs.get("input_type", "passage")
 
         vectors_by_id: dict[str, list[float]] = {}
-        text_chunks = [c for c in chunks if c.metadata.get("modality") != "image"]
+        text_chunks = [
+            c for c in chunks
+            if c.metadata.get("modality") not in ("image", "text_image")
+        ]
         image_chunks = [c for c in chunks if c.metadata.get("modality") == "image"]
+        text_image_chunks = [c for c in chunks if c.metadata.get("modality") == "text_image"]
 
         for i in range(0, len(text_chunks), batch_size):
             batch = text_chunks[i:i + batch_size]
@@ -122,6 +154,9 @@ class LiteLLMEmbedding(BaseEmbeddingStrategy):
 
         for chunk in image_chunks:
             vectors_by_id[chunk.id] = self._embed_image_chunk(chunk, model, input_type)
+
+        for chunk in text_image_chunks:
+            vectors_by_id[chunk.id] = self._embed_text_image_chunk(chunk, model, input_type)
 
         return [
             EmbeddingVector(

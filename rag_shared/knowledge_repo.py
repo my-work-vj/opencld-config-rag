@@ -14,6 +14,7 @@ from rag_shared.schemas import (
     UpdateAgentRequest,
     UpdateKnowledgeBaseRequest,
 )
+from rag_shared.index_config import enabled_index_types, normalize_index_config
 from rag_shared.slug import slugify_name
 
 logger = logging.getLogger(__name__)
@@ -52,13 +53,8 @@ def _ks_to_info(record: KnowledgeSource) -> dict[str, Any]:
 
 
 def _kb_source_snapshot(db: Session, source_name: str) -> dict[str, Any]:
-    ks = KnowledgeSourceRepo.get(db, source_name)
-    return {
-        "source_name": ks.name,
-        "collection_name": ks.collection_name,
-        "vector_size": ks.vector_size,
-        "embedding_model": ks.embedding_model or "",
-    }
+    from rag_shared.kb_catalog import build_profile_catalog
+    return build_profile_catalog(db, source_name)
 
 
 def _resolve_kb_names(req: CreateAgentRequest | UpdateAgentRequest, record: Agent | None = None) -> list[str]:
@@ -219,11 +215,33 @@ class KnowledgeBaseRepo:
         for kb_name in kb_names:
             kb = KnowledgeBaseRepo.get(db, kb_name)
             for src in kb.sources or []:
-                col = src.get("collection_name", "")
+                source_name = src.get("source_name")
+                if not source_name:
+                    continue
+                try:
+                    snapshot = _kb_source_snapshot(db, source_name)
+                except KnowledgeSourceNotFoundError:
+                    snapshot = dict(src)
+                col = snapshot.get("collection_name", "")
                 if col and col not in seen:
                     seen.add(col)
-                    collections.append(src)
+                    collections.append(snapshot)
         return collections
+
+    @staticmethod
+    def resolve_sources(db: Session, kb_name: str) -> list[dict[str, Any]]:
+        """Live profile catalog entries for all sources in a knowledge base."""
+        record = KnowledgeBaseRepo.get(db, kb_name)
+        resolved: list[dict[str, Any]] = []
+        for src in record.sources or []:
+            source_name = src.get("source_name")
+            if not source_name:
+                continue
+            try:
+                resolved.append(_kb_source_snapshot(db, source_name))
+            except KnowledgeSourceNotFoundError:
+                resolved.append({**src, "status": "missing", "enabled_indexes": []})
+        return resolved
 
 
 def _validate_kb_embedding_consistency(db: Session, kb_names: list[str]) -> None:

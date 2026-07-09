@@ -253,13 +253,7 @@ export type IndexConfig = {
 
 // ── Knowledge Source ──
 
-export type IndexConfig = {
-  vector: boolean
-  sparse: boolean
-  graph: boolean
-  metadata: boolean
-  memory: boolean
-}
+export type IngestionMode = 'document_plain' | 'document_vision' | 'websites'
 
 export type KnowledgeSource = {
   id: string
@@ -462,8 +456,28 @@ export type DataConnectorUploadResponse = {
 export type KnowledgeBaseSource = {
   source_name: string
   collection_name: string
+  store_namespace?: string
   vector_size: number
   embedding_model: string
+  index_config?: IndexConfig
+  enabled_indexes?: string[]
+  ingestion_mode?: IngestionMode
+  data_connector_ids?: string[]
+  status?: string
+  document_count?: number
+  chunk_count?: number
+  monitor_enabled?: boolean
+  modalities?: string[]
+}
+
+export type KnowledgeBaseIndexCatalog = {
+  knowledge_base: string
+  description: string
+  profile_count: number
+  profiles: KnowledgeBaseSource[]
+  aggregated_indexes: string[]
+  data_connector_ids: string[]
+  modalities: string[]
 }
 
 export type KnowledgeBase = {

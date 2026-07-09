@@ -1,21 +1,26 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Database, Plus } from 'lucide-react'
+import { Database, ChevronDown, ChevronRight, Plus } from 'lucide-react'
 import { api, ApiError } from '@/lib/api'
 import { Card, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card'
-import { Label, Input, Textarea, Select } from '@/components/ui/Field'
+import { Label, Input, Textarea } from '@/components/ui/Field'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { EmptyState, Spinner } from '@/components/ui/Feedback'
-import RagStagesEditor, { resolveStageMaps, type IngestionMode } from '@/components/RagStagesEditor'
-import { IndexConfigEditor, IndexConfigBadges, DEFAULT_INDEX_CONFIG, normalizeIndexConfig } from '@/components/IndexConfigEditor'
+import RagStagesEditor, { IngestionModePicker, resolveStageMaps, type IngestionMode } from '@/components/RagStagesEditor'
+import { IndexConfigEditor, IndexConfigBadges, DEFAULT_INDEX_CONFIG } from '@/components/IndexConfigEditor'
 import type { IndexConfig } from '@/types/api'
 import { 
   DEFAULT_EMBEDDING_MODEL,
   DEFAULT_INGESTION_STAGES,
 } from '@/lib/stage-defaults'
 import type { KnowledgeSource } from '@/types/api'
+import {
+  INDEX_PROFILE_PLURAL,
+  INDEX_PROFILE_SINGULAR,
+  indexProfilePath,
+} from '@/lib/terminology'
 
 export function CollectionsPage() {
   const queryClient = useQueryClient()
@@ -28,6 +33,7 @@ export function CollectionsPage() {
   const [stageConfigs, setStageConfigs] = useState<Record<string, string>>({})
   const [ingestionMode, setIngestionMode] = useState<IngestionMode>('document_plain')
   const [indexConfig, setIndexConfig] = useState<IndexConfig>(DEFAULT_INDEX_CONFIG)
+  const [showAdvanced, setShowAdvanced] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const collections = useQuery({
@@ -128,26 +134,26 @@ export function CollectionsPage() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-white">Collections</h1>
+          <h1 className="text-2xl font-bold tracking-tight text-white">{INDEX_PROFILE_PLURAL}</h1>
           <p className="mt-1 max-w-2xl text-sm text-slate-400">
-            Configure ingestion stages, link data sources, and build a monitored Qdrant
-            collection end to end. Now with configurable index types for flexible RAG strategies.
+            Organize data sources into separate indexed stores. Each profile links one or more
+            sources, runs the ingestion pipeline, and builds only the index types you enable
+            (vector, sparse, graph, metadata, memory).
           </p>
         </div>
         <Button onClick={() => setShowForm(!showForm)} variant="secondary">
           <Plus className="size-4" aria-hidden="true" />
-          New collection
+          New {INDEX_PROFILE_SINGULAR.toLowerCase()}
         </Button>
       </div>
 
       {showForm && (
         <Card elevated>
           <CardHeader>
-            <CardTitle>Create vector collection</CardTitle>
+            <CardTitle>Create {INDEX_PROFILE_SINGULAR.toLowerCase()}</CardTitle>
             <CardDescription>
-              Link one or more data sources and choose your embedding model and document source
-              type. The ingestion pipeline handles chunking, embedding, and indexing automatically
-              via LiteLLM. Configure which index types to enable for this collection.
+              Link data sources and choose which index types to build. Ingestion runs
+              automatically and stays in sync when connector files change.
             </CardDescription>
           </CardHeader>
           <form onSubmit={handleCreate} className="space-y-6">
@@ -169,7 +175,7 @@ export function CollectionsPage() {
                     <Link to="/data-sources" className="text-indigo-400 hover:underline">
                       Add a data source
                     </Link>{' '}
-                    before creating a collection.
+                    before creating an index profile.
                   </p>
                 ) : (
                   <ul className="max-h-40 space-y-2 overflow-y-auto rounded-lg border border-slate-700/60 p-3">
@@ -203,23 +209,50 @@ export function CollectionsPage() {
 
             <IndexConfigEditor value={indexConfig} onChange={setIndexConfig} />
 
-            <RagStagesEditor
-              baseStages={DEFAULT_INGESTION_STAGES}
-              stageStrategies={stageStrategies}
-              stageConfigs={stageConfigs}
-              onChangeStrategies={setStageStrategies}
-              onChangeConfigs={setStageConfigs}
-              embeddingModel={embeddingModel}
-              onChangeEmbeddingModel={setEmbeddingModel}
-              llmModels={llmModels.data}
+            <IngestionModePicker
               ingestionMode={ingestionMode}
               onChangeIngestionMode={setIngestionMode}
-              strategies={strategies.data}
             />
+
+            <div className="rounded-lg border border-slate-700/60">
+              <button
+                type="button"
+                onClick={() => setShowAdvanced((v) => !v)}
+                className="flex w-full items-center gap-2 px-4 py-3 text-left text-sm font-medium text-slate-200 hover:bg-slate-800/50"
+              >
+                {showAdvanced ? (
+                  <ChevronDown className="size-4 text-slate-400" aria-hidden="true" />
+                ) : (
+                  <ChevronRight className="size-4 text-slate-400" aria-hidden="true" />
+                )}
+                Advanced pipeline settings
+                <span className="ml-auto text-xs font-normal text-slate-500">
+                  embedding model, chunking overrides
+                </span>
+              </button>
+              {showAdvanced && (
+                <div className="border-t border-slate-700/60 p-4">
+                  <RagStagesEditor
+                    advancedOnly
+                    baseStages={DEFAULT_INGESTION_STAGES}
+                    stageStrategies={stageStrategies}
+                    stageConfigs={stageConfigs}
+                    onChangeStrategies={setStageStrategies}
+                    onChangeConfigs={setStageConfigs}
+                    embeddingModel={embeddingModel}
+                    onChangeEmbeddingModel={setEmbeddingModel}
+                    llmModels={llmModels.data}
+                    ingestionMode={ingestionMode}
+                    onChangeIngestionMode={setIngestionMode}
+                    strategies={strategies.data}
+                  />
+                </div>
+              )}
+            </div>
 
             {error && <p className="text-sm text-red-400" role="alert">{error}</p>}
             <Button type="submit" isLoading={createMutation.isPending}>
-              Create collection
+              Create {INDEX_PROFILE_SINGULAR.toLowerCase()}
             </Button>
           </form>
         </Card>
@@ -227,9 +260,13 @@ export function CollectionsPage() {
 
       {list.length === 0 ? (
         <EmptyState
-          title="No collections"
-          description="Create a collection with full ingestion stage configuration."
-          action={<Button onClick={() => setShowForm(true)}>Create collection</Button>}
+          title={`No ${INDEX_PROFILE_PLURAL.toLowerCase()}`}
+          description="Create an index profile to ingest selected data sources into your chosen index types."
+          action={
+            <Button onClick={() => setShowForm(true)}>
+              Create {INDEX_PROFILE_SINGULAR.toLowerCase()}
+            </Button>
+          }
         />
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -265,9 +302,9 @@ function CollectionCard({ collection }: { collection: KnowledgeSource }) {
         <IndexConfigBadges config={collection.metadata?.index_config} />
       </div>
       <div className="mt-4">
-        <Link to={`/collections/${encodeURIComponent(collection.name)}`}>
+        <Link to={indexProfilePath(collection.name)}>
           <Button variant="secondary" className="w-full" size="sm">
-            Open collection
+            Open profile
           </Button>
         </Link>
       </div>
